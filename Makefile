@@ -19,6 +19,7 @@ build/entry.o: kernel/entry.S | build
 build/isr.o: kernel/isr.S | build
 	$(AS) $< -o $@
 build/%.o: %.c | build
+	@mkdir -p $(@D)
 	$(YOROOS_CC) -c $< -o $@
 
 build/kernel.bin: $(KOBJ) $(KASM)
