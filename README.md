@@ -35,18 +35,31 @@
 
 ```bash
 make            # соберёт yoroos.img (16 МБ, boot+loader+kernel)
+make iso        # соберёт yoroos.iso (загрузочный CD, El Torito)
 make sim        # соберёт хост-симулятор (для разработки без QEMU)
 make run-sim    # прогнать сценарий симуляции
 ```
 
 ## Запуск
 
-### QEMU
+### QEMU — образ диска
 ```bash
 qemu-system-i386 -hda yoroos.img -m 128
 # со звуком:
 qemu-system-i386 -hda yoroos.img -m 128 -audiodev pa,id=snd -machine pcspk-audiodev=snd
 ```
+
+### QEMU — загрузочный CD
+```bash
+qemu-system-i386 -cdrom yoroos.iso -hda fs.img -m 128
+```
+ISO собирается своим инструментом (`tools/mkiso.py`) без xorriso/genisoimage:
+ISO9660 + El Torito в режиме эмуляции жёсткого диска — BIOS грузит вложенный
+MBR, дальше работает тот же загрузчик, что и на флешке. Внутри ISO лежит
+те же 16 МБ (boot + loader + kernel + пустая YoroFS).
+
+**Важно:** файловая система пишется установщиком через ATA на **-hda** —
+дайте QEMU чистый диск (`fs.img`), CD остаётся read-only.
 
 ### Реальное железо
 ```bash

@@ -10,6 +10,7 @@ KOBJ = $(patsubst %.c,build/%.o,$(KSRC))
 KASM = build/entry.o build/isr.o
 
 all: yoroos.img
+iso: yoroos.iso
 
 build:
 	mkdir -p build
@@ -42,6 +43,11 @@ yoroos.img: build/boot.bin build/loader.bin build/kernel.bin
 	dd if=build/kernel.bin of=$@ bs=512 seek=9 conv=notrunc status=none
 	@echo "=== yoroos.img готов ($$(du -h $@ | cut -f1)) ==="
 
+# ---- загрузочный CD (El Torito, эмуляция жёсткого диска) ----
+yoroos.iso: build/boot.bin build/loader.bin build/kernel.bin
+	python3 tools/mkiso.py $^ $@ 16
+	@echo "=== yoroos.iso готов ($$(du -h $@ | cut -f1)) ==="
+
 # ---- симулятор для разработки (рендерит кадры в PNG) ----
 SIMSRC = tools/sim.c kernel/src/klib.c kernel/src/fs.c kernel/src/gfx.c \
          kernel/src/ui.c kernel/src/apps.c kernel/src/installer.c kernel/src/ata.c kernel/font.c
@@ -52,6 +58,6 @@ run-sim: sim
 	./build/sim
 
 clean:
-	rm -rf build yoroos.img out/*.png
+	rm -rf build yoroos.img yoroos.iso out/*.png
 
-.PHONY: all clean sim run-sim
+.PHONY: all clean sim run-sim iso
