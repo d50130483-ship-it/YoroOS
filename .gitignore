@@ -3,3 +3,9 @@ out/
 *.img
 *.o
 .cache/
+build/
+out/
+*.img
+*.o
+.cache/
+__pycache__/
