@@ -387,7 +387,7 @@ static void populate_system_tree(void) {
     fs_create_bin(s32, "hello.exe", exe_hello, (int)sizeof(exe_hello));
     fs_create_bin(s32, "sysinfo.exe", exe_sysinfo, (int)sizeof(exe_sysinfo));
     fs_create(s32, "os_version.ini",
-              "[YoroOS]\nVersion=0.2.2\nCodename=Aurora\nArch=UEFI_x86_64_Gen2_and_BIOS_x86\n"
+              "[YoroOS]\nVersion=0.2.3\nCodename=Aurora\nArch=UEFI_x86_64_Gen2_and_BIOS_x86\n"
               "SystemDeleteProtection=DISABLED_BY_DESIGN\n");
     fs_create(boot, "boot.cfg",
               "default=YoroOS-0.2-Aurora\ngpt_esp=FAT16_8142_CLUSTERS\nroot=PARTLABEL=YOROFS2\n");

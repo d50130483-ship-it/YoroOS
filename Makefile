@@ -38,7 +38,7 @@ B32_OBJS := $(patsubst %,build/b32/%.o,$(CORE_C)) \
             build/b32/fx.o build/b32/hv_native.o build/b32/ata.o build/b32/hal_bios32.o \
             build/b32/entry.o build/b32/isr.o build/b32/pe_asm.o
 
-ISO_OUT  := release/YoroOS-0.2.2.iso
+ISO_OUT  := release/YoroOS-0.2.3.iso
 
 .PHONY: all clean seeds iso
 
