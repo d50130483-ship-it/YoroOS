@@ -45,13 +45,42 @@ void desktop_init(void) {
 
 void desktop_rebuild(void) { wm_invalidate(); }
 
+static int icon_step(void) {
+    int avail = (int)fb.height - TASKBAR - 20;
+    int step = avail / (NICONS > 0 ? NICONS : 1);
+    if (step > ICON_H) step = ICON_H;
+    if (step < 64) step = 64;
+    return step;
+}
+
 static Rect icon_rect(int idx) {
     Rect r;
+    int step = icon_step();
     r.x = 16;
-    r.y = 16 + idx * ICON_H;
+    r.y = 12 + idx * step;
     r.w = ICON_W;
-    r.h = ICON_H - 12;
+    r.h = step - 8;
     return r;
+}
+
+/* draw text shortened with an ellipsis when it does not fit into maxw */
+static void draw_text_fit(int x, int y, const char *text, int maxw, Color fg, Rect clip) {
+    int tw = text_width(text);
+    if (tw <= maxw) { draw_text_clip(x, y, text, fg, clip); return; }
+    {
+        char buf[96];
+        int n = (int)strlen(text), i;
+        int ew = text_width("...");
+        if (n > 92) n = 92;
+        for (i = n; i > 0; i--) {
+            memcpy(buf, text, (size_t)i);
+            buf[i] = 0;
+            if (text_width(buf) + ew <= maxw) break;
+        }
+        if (i <= 0) { buf[0] = 0; i = 0; }
+        strcpy(buf + i, "...");
+        draw_text_clip(x, y, buf, fg, clip);
+    }
 }
 
 static void label_centered(const char *text, int cx, int y, Rect clip) {
@@ -62,14 +91,14 @@ static void label_centered(const char *text, int cx, int y, Rect clip) {
 
 static void draw_icon(int idx, int selected, int hover) {
     Rect r = icon_rect(idx);
-    Rect box = {r.x + (r.w - 52) / 2, r.y + 4, 52, 52};
+    Rect box = {r.x + (r.w - 46) / 2, r.y + 2, 46, 46};
     const char *lbl = icons[idx].label;
-    Rect label = {r.x + r.w / 2 - 64, r.y + 60, 128, 40};
+    Rect label = {r.x + r.w / 2 - 64, r.y + 50, 128, 40};
     if (selected || hover)
         fill_round_rect_alpha((Rect){box.x - 4, box.y - 4, box.w + 8, box.h + 8}, 6,
                         selected ? RGBA(255, 255, 255, 60) : RGBA(255, 255, 255, 26));
     draw_shadow(box, 3);
-    icon_draw(icons[idx].icon, box.x + 4, box.y + 4, 44);
+    icon_draw(icons[idx].icon, box.x + 3, box.y + 3, 40);
     {
         int cx = r.x + r.w / 2;
         int tw = text_width(lbl);
@@ -267,8 +296,8 @@ static void draw_startmenu(void) {
                 int hov = pt_in(mx, my, tile) && pt_in(mx, my, grid);
                 if (hov) fill_round_rect_alpha(tile, 6, RGBA(255, 255, 255, 22));
                 icon_draw(a->icon, tile.x + 8, tile.y + 9, 36);
-                draw_text_clip(tile.x + 52, tile.y + (tile.h - FONT_H) / 2, a->name, RGB(238, 242, 250),
-                               (Rect){tile.x + 52, tile.y, tile.w - 54, tile.h});
+                draw_text_fit(tile.x + 52, tile.y + (tile.h - FONT_H) / 2, a->name, tile.w - 56,
+                              RGB(238, 242, 250), (Rect){tile.x + 52, tile.y, tile.w - 54, tile.h});
             }
             idx++;
         }
