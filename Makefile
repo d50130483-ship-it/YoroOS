@@ -67,8 +67,8 @@ build/hello_exe.h: build/hello.exe tools/mkbin.py
 build/fs.o: build/hello_exe.h
 
 # the installer writes these exact bytes to disk
-build/bootimg.h: build/boot.bin build/stage2.bin build/kernel.bin tools/mkimgblobs.py
-	python3 tools/mkimgblobs.py build/boot.bin build/stage2.bin build/kernel.bin $@
+build/bootimg.h: build/boot.bin build/stage2.bin tools/mkimgblobs.py
+	python3 tools/mkimgblobs.py build/boot.bin build/stage2.bin $@
 
 build/app_installer.o: build/bootimg.h
 

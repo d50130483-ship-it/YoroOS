@@ -69,9 +69,22 @@ static void log_add(const char *text) {
     install_log_n++;
 }
 
-/* the count is patched into the blob at build time (tools/mkimgblobs.py) */
+/* the BIOS handed us the real image, so its patched sector count is the
+ * authoritative one; the embedded blob still carries the build-time value */
 static u32 kernel_sectors(void) {
-    return (u32)boot_sector_blob[0x1F0] | ((u32)boot_sector_blob[0x1F1] << 8);
+    const u8 *live = (const u8 *)0x7C00;
+    u32 n = (u32)live[0x1F0] | ((u32)live[0x1F1] << 8);
+    if (n == 0 || n > 4096)
+        n = (u32)boot_sector_blob[0x1F0] | ((u32)boot_sector_blob[0x1F1] << 8);
+    return n;
+}
+
+/* copy of the boot sector with the live kernel sector count patched in */
+static void build_boot_sector(u8 *out) {
+    u32 n = kernel_sectors();
+    memcpy(out, boot_sector_blob, 512);
+    out[0x1F0] = (u8)(n & 0xFF);
+    out[0x1F1] = (u8)((n >> 8) & 0xFF);
 }
 
 static void refresh_disks(void) {
@@ -112,7 +125,7 @@ static void install_tick(void) {
             u8 sector[512];
             u8 back[512];
             int ok;
-            memcpy(sector, BOOT_SECTOR_ADDR, 512);
+            build_boot_sector(sector);
             if (ata_write(d, 0, 1, sector) < 0) { install_error = 1; install_stage = 3; break; }
             ok = ata_read(d, 0, 1, back) == 0 && back[510] == 0x55 && back[511] == 0xAA &&
                  memcmp(back, sector, 512) == 0;

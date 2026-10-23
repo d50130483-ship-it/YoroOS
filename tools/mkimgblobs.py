@@ -3,26 +3,25 @@
 
 The setup program must write exactly the bytes that boot on real hardware, so
 it cannot rely on low memory (firmware, the BIOS and our own loader all reuse
-0x7C00/0x8000).  This generator emits a header with both blobs and patches the
-kernel sector count into the boot sector's parameter block at 0x1F0.
+0x7C00/0x8000).  This generator emits a header with both blobs.
+
+The kernel sector count in the boot sector's parameter block (0x1F0) is *not*
+patched here on purpose: that would make the header depend on the kernel that
+depends on the header.  The installer patches the count at run time from the
+boot sector the BIOS actually loaded.
 """
 import sys
 
-boot_path, stage2_path, kernel_path, out_path = sys.argv[1:5]
+boot_path, stage2_path, out_path = sys.argv[1:4]
 
 boot = bytearray(open(boot_path, "rb").read())
 stage2 = open(stage2_path, "rb").read()
-kernel_len = len(open(kernel_path, "rb").read())
 
 if len(boot) != 512:
     raise SystemExit("mkimgblobs: boot sector must be 512 bytes")
 if len(stage2) > 2048:
     raise SystemExit("mkimgblobs: stage 2 must fit in 2 KiB")
 
-sectors = (kernel_len + 511) // 512
-boot[0x1F0] = sectors & 0xFF
-boot[0x1F1] = (sectors >> 8) & 0xFF
-# signature must survive the patch
 assert boot[510] == 0x55 and boot[511] == 0xAA
 
 
@@ -39,5 +38,4 @@ with open(out_path, "w") as f:
     emit(f, "boot_sector_blob", boot)
     emit(f, "stage2_blob", stage2)
 
-print("mkimgblobs: %s (boot 512 B, stage2 %d B, kernel %d sectors)"
-      % (out_path, len(stage2), sectors))
+print("mkimgblobs: %s (boot 512 B, stage2 %d B)" % (out_path, len(stage2)))
