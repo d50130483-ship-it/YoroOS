@@ -199,75 +199,170 @@ void zip_open_node(int node) {
     wm_invalidate();
 }
 
-/* ---------------- EXE inspector ---------------- */
-static u8 *exe_data = NULL;
+/* ---------------- Win32 EXE runner ---------------- */
+static const u8 *exe_data = NULL;
 static int exe_len = 0;
 static char exe_name[80];
+static char exe_log[12288];
+static int exe_ran = 0;
+static int exe_code = 0;
+static int exe_elapsed = 0;
+static int exe_ok = 0;
+static int exe_scroll = 0;
+static int exe_follow = 1;   /* keep the newest console line in view */
+static int exe_lines = 0;
+
+static int exe_visible_lines(Rect box) { return (box.h - 20) / 19; }
+
+static int exe_run_now(void) {
+    int code = 0;
+    int t0;
+    exe_scroll = 0;
+    exe_follow = 1;
+    exe_log[0] = 0;
+    exe_ok = 0;
+    exe_code = 0;
+    exe_elapsed = 0;
+    exe_ran = 1;
+    if (!exe_data) return -1;
+    t0 = (int)sys_ticks();
+    if (pe_run(exe_data, exe_len, exe_log, sizeof(exe_log), &code) == 0) {
+        exe_ok = 1;
+        exe_code = code;
+    }
+    exe_elapsed = ((int)sys_ticks() - t0) * 10;
+    {
+        int n = 0, i;
+        for (i = 0; exe_log[i]; i++)
+            if (exe_log[i] == '\n') n++;
+        exe_lines = n;
+    }
+    wm_invalidate();
+    return exe_ok ? 0 : -1;
+}
 
 static void exe_draw(Window *w, Rect c) {
-    char buf[200];
-    int is_pe = 0, machine = 0, subsystem = 0, sections = 0;
-    u32 entry = 0;
-    Rect card = {c.x + 24, c.y + 24, c.w - 48, c.h - 120};
+    char buf[220];
+    Rect card = {c.x + 22, c.y + 88, c.w - 44, c.h - 236};
+    int i, line = 0, y;
+    int vis = exe_visible_lines(card);
+    int is_pe = exe_data ? pe_is_pe(exe_data, exe_len) : 0;
 
-    if (exe_len > 0x40 && exe_data[0] == 'M' && exe_data[1] == 'Z') {
-        u32 lfanew = rd32(exe_data + 0x3C);
-        if ((int)lfanew + 24 < exe_len && rd32(exe_data + lfanew) == 0x00004550UL) {
-            is_pe = 1;
-            machine = rd16(exe_data + lfanew + 4);
-            sections = rd16(exe_data + lfanew + 6);
-            entry = rd32(exe_data + lfanew + 40);
-            subsystem = rd16(exe_data + lfanew + 24 + 68);
-        }
+    if (exe_follow) {
+        exe_scroll = exe_lines + 1 - vis;
+        if (exe_scroll < 0) exe_scroll = 0;
     }
 
     fill_grad_v(c, RGB(18, 26, 44), RGB(8, 12, 22));
-    icon_draw(ICON_DOWNLOAD, c.x + (c.w - 64) / 2, c.y + 26, 64);
-    draw_text_center(c.x + c.w / 2, c.y + 100, exe_name, C_WHITE);
-    draw_text_center(c.x + c.w / 2, c.y + 124, "Исполняемый файл Windows", RGB(150, 172, 202));
-
-    fill_round_rect(card, 10, RGBA(255, 255, 255, 18));
-    draw_round_rect(card, 10, RGBA(255, 255, 255, 40));
-    draw_text(card.x + 18, card.y + 16, "Сведения о файле", C_WHITE);
-    snprintf(buf, sizeof(buf), "Размер: %d Б", exe_len);
-    draw_text(card.x + 18, card.y + 46, buf, RGB(190, 206, 226));
+    icon_draw(ICON_EXE, c.x + 24, c.y + 20, 46);
+    draw_text(c.x + 84, c.y + 22, exe_name, C_WHITE);
     if (is_pe) {
-        snprintf(buf, sizeof(buf), "PE32 · machine 0x%04x · секций %d", machine, sections);
-        draw_text(card.x + 18, card.y + 70, buf, RGB(190, 206, 226));
-        snprintf(buf, sizeof(buf), "Точка входа RVA: 0x%x · подсистема %d", entry, subsystem);
-        draw_text(card.x + 18, card.y + 94, buf, RGB(190, 206, 226));
+        pe_summary(exe_data, exe_len, buf, sizeof(buf));
+        draw_text(c.x + 84, c.y + 46, buf, RGB(140, 200, 255));
+        draw_text(c.x + 84, c.y + 68, "PE32 · загрузка и исполнение ядром YoroOS", RGB(140, 158, 186));
     } else {
-        draw_text(card.x + 18, card.y + 70, "Формат MZ/COM (DOS)", RGB(190, 206, 226));
+        draw_text(c.x + 84, c.y + 46, "Файл не является PE32-образом", RGB(255, 170, 120));
+        draw_text(c.x + 84, c.y + 68, "Можно открыть как текст", RGB(140, 158, 186));
     }
-    draw_text(card.x + 18, card.y + 126,
-              "YoroOS 0.1 умеет читать структуру EXE и открывать его ресурсы,", RGB(150, 168, 192));
-    draw_text(card.x + 18, card.y + 148,
-              "но не исполняет Win32-код: для этого нужен подсистема PE в 0.2.", RGB(150, 168, 192));
 
-    ui_button((Rect){c.x + c.w / 2 - 170, c.y + c.h - 74, 160, 38}, "Открыть как текст", 0, 0);
-    ui_button((Rect){c.x + c.w / 2 + 10, c.y + c.h - 74, 160, 38}, "Закрыть", 0, 1);
+    fill_round_rect(card, 10, RGB(10, 14, 24));
+    draw_round_rect(card, 10, RGB(38, 50, 72));
+    gfx_set_clip((Rect){card.x + 1, card.y + 1, card.w - 2, card.h - 2});
+    y = card.y + 10 - exe_scroll * 19;
+    {
+        const char *p = exe_log;
+        while (*p) {
+            const char *e = p;
+            char tmp[220];
+            int n;
+            while (*e && *e != '\n') e++;
+            n = (int)(e - p);
+            if (n > (int)sizeof(tmp) - 1) n = (int)sizeof(tmp) - 1;
+            memcpy(tmp, p, (size_t)n);
+            tmp[n] = 0;
+            while (n > 0 && (tmp[n - 1] == '\r' || tmp[n - 1] == ' ')) tmp[--n] = 0;
+            if (line >= 0 && y >= card.y + 2 && y <= card.y + card.h - FONT_H)
+                draw_text(card.x + 16, y, tmp, RGB(190, 220, 190));
+            (void)i;
+            y += 19;
+            line++;
+            p = *e ? e + 1 : e;
+        }
+    }
+    gfx_set_clip((Rect){0, 0, (int)fb.width, (int)fb.height});
+    if (exe_lines + 1 > vis) {
+        Rect track = {card.x + card.w - 10, card.y + 6, 4, card.h - 12};
+        ui_scrollbar(track, exe_lines + 1, vis, exe_scroll);
+    }
+    if (exe_ran && !exe_ok)
+        draw_text(card.x + 16, card.y + card.h - 18, "Не удалось выполнить файл", RGB(255, 170, 120));
+
+    {
+        int bw = 170, gap = 12;
+        int bx = c.x + (c.w - (bw * 3 + gap * 2)) / 2;
+        int by = c.y + c.h - 92;
+        ui_button((Rect){bx, by, bw, 38}, exe_ran ? "Запустить снова" : "Запустить", 0, 1);
+        ui_button((Rect){bx + bw + gap, by, bw, 38}, "Открыть как текст", 0, 0);
+        ui_button((Rect){bx + (bw + gap) * 2, by, bw, 38}, "Закрыть", 0, 0);
+        if (exe_ran && exe_ok) {
+            snprintf(buf, sizeof(buf), "Процесс завершён · код %d · %d мс", exe_code, exe_elapsed);
+            draw_text_center(c.x + c.w / 2, by - 26, buf, RGB(120, 220, 160));
+        } else if (!exe_ran) {
+            draw_text_center(c.x + c.w / 2, by - 26, "Нажмите «Запустить», чтобы выполнить код EXE",
+                             RGB(140, 158, 186));
+        }
+    }
     UNUSED(w);
 }
 
 static void exe_event(Window *w, YoroEvent *e) {
     Rect c = wm_client(w);
+    Rect card = {c.x + 22, c.y + 88, c.w - 44, c.h - 236};
+    int bw = 170, gap = 12;
+    int bx = c.x + (c.w - (bw * 3 + gap * 2)) / 2;
+    int by = c.y + c.h - 92;
     int mx = e->x + c.x, my = e->y + c.y;
-    if (e->type != EV_MOUSE_DOWN) return;
-    if (pt_in(mx, my, (Rect){c.x + c.w / 2 - 170, c.y + c.h - 74, 160, 38})) {
+
+    if (e->type == EV_WHEEL) {
+        int vis = exe_visible_lines(card);
+        exe_follow = 0;
+        exe_scroll -= e->wheel;
+        if (exe_scroll > exe_lines - vis + 1) exe_scroll = exe_lines - vis + 1;
+        if (exe_scroll < 0) exe_scroll = 0;
+        wm_invalidate();
+        return;
+    }
+    if (e->type != EV_MOUSE_DOWN || e->btn != 1) return;
+
+    if (pt_in(mx, my, (Rect){bx, by, bw, 38})) {
+        exe_run_now();
+        return;
+    }
+    if (pt_in(mx, my, (Rect){bx + bw + gap, by, bw, 38})) {
         int n = fs_lookup(fs_root(), exe_name);
+        if (n < 0) {
+            /* try the Downloads folder */
+            int dl = fs_lookup(fs_lookup(fs_root(), "Users"), "Yoro");
+            dl = fs_lookup(dl, "Downloads");
+            n = fs_lookup(dl, exe_name);
+        }
         if (n >= 0) notepad_open_file(n);
         return;
     }
-    if (pt_in(mx, my, (Rect){c.x + c.w / 2 + 10, c.y + c.h - 74, 160, 38})) {
+    if (pt_in(mx, my, (Rect){bx + (bw + gap) * 2, by, bw, 38})) {
         wm_close(w);
         return;
     }
 }
 
 void exe_open_node(int node) {
+    char title[120];
     exe_data = (u8 *)fs_data(node);
     exe_len = fs_size(node);
     strncpy(exe_name, fs_name(node), sizeof(exe_name) - 1);
-    wm_open(app_find("exe"), "Запуск EXE", -1, -1, 560, 460, exe_draw, exe_event, NULL);
+    exe_name[sizeof(exe_name) - 1] = 0;
+    snprintf(title, sizeof(title), "%s — запуск EXE", exe_name);
+    wm_open(app_find("exe"), title, -1, -1, 800, 640, exe_draw, exe_event, NULL);
+    exe_run_now();          /* same as Windows: opening an EXE starts it */
     wm_invalidate();
 }

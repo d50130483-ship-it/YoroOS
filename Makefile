@@ -8,7 +8,7 @@ OBJCOPY := objcopy
 
 CFLAGS := -m32 -std=gnu99 -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector \
           -fno-asynchronous-unwind-tables -fno-builtin -fno-common -mno-sse -mno-mmx \
-          -mno-80387 -Wall -Wextra -Wno-unused-parameter -Iinclude
+          -mno-80387 -Wall -Wextra -Wno-unused-parameter -Iinclude -Ibuild
 LDFLAGS := -m elf_i386 -T boot/kernel.ld --build-id=none -nostdlib
 
 KERNEL_SRC := kernel/start.c kernel/string.c kernel/heap.c kernel/gfx.c \
@@ -17,7 +17,7 @@ KERNEL_SRC := kernel/start.c kernel/string.c kernel/heap.c kernel/gfx.c \
               kernel/app_settings.c kernel/app_browser.c kernel/app_store.c \
               kernel/app_misc.c kernel/icons.c kernel/desktop.c kernel/main.c \
               kernel/font_data.c kernel/ata.c kernel/inflate.c \
-              kernel/app_zip.c kernel/app_installer.c
+              kernel/app_zip.c kernel/app_installer.c kernel/pe.c
 KERNEL_OBJ := $(patsubst kernel/%.c,build/%.o,$(KERNEL_SRC))
 
 .PHONY: all clean iso image run
@@ -36,7 +36,37 @@ build/entry.o: kernel/entry.asm | build
 build/isr.o: kernel/isr.asm | build
 	$(AS) --32 $< -o $@
 
-build/kernel.elf: $(KERNEL_OBJ) build/entry.o build/isr.o | build
+build/pe_asm.o: kernel/pe_asm.s | build
+	$(AS) --32 $< -o $@
+
+# --- Win32 sample programs: real PE32 images with real import tables --------
+UL := build/userland
+$(UL):
+	@mkdir -p $@
+
+$(UL)/hello.o: userland/hello.c | $(UL)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(UL)/thunks.o: userland/thunks.s | $(UL)
+	$(CC) -m32 -c $< -o $@
+
+$(UL)/hello.elf: $(UL)/hello.o $(UL)/thunks.o userland/pe.ld | $(UL)
+	$(LD) -m elf_i386 -T userland/pe.ld --build-id=none -nostdlib -o $@ \
+		$(UL)/hello.o $(UL)/thunks.o
+	nm -n $@ > $(UL)/hello.syms
+	$(OBJCOPY) -O binary -j .text -j .iat $@ $(UL)/hello.payload
+
+build/hello.exe: $(UL)/hello.elf tools/mkpe.py
+	python3 tools/mkpe.py $(UL)/hello.payload $@ --symbols $(UL)/hello.syms \
+		--import "KERNEL32.dll:GetStdHandle,WriteConsoleA,WriteFile,GetTickCount,Sleep,GetCommandLineA,GetModuleHandleA,GetVersion,ExitProcess" \
+		--import "USER32.dll:MessageBoxA"
+
+build/hello_exe.h: build/hello.exe tools/mkbin.py
+	python3 tools/mkbin.py $< hello_exe > $@
+
+build/fs.o: build/hello_exe.h
+
+build/kernel.elf: $(KERNEL_OBJ) build/entry.o build/isr.o build/pe_asm.o | build
 	$(LD) $(LDFLAGS) -o $@ $^
 	@size $@
 

@@ -504,7 +504,12 @@ void kmain(void) {
     mouse_init();
 
     klog("[YoroOS] gdt/idt/pic/pit ready, memkb=%d", (int)MEMKB);
-    heap_init(0x100000, (MEMKB > 4096 ? MEMKB - 2048 : 2048) * 1024);
+    /* The PE arena lives at 4 MiB (the usual Windows ImageBase).  Keep the
+     * heap above it so a loaded EXE can never smash kernel allocations. */
+    if (MEMKB > 0x3000)
+        heap_init(PE_ARENA_BASE + PE_ARENA_SIZE, (MEMKB - 0x2000) * 1024);
+    else
+        heap_init(0x100000, (MEMKB > 4096 ? MEMKB - 2048 : 2048) * 1024);
     klog("[YoroOS] heap %d KiB", (int)heap_total() / 1024);
     gfx_init();
     klog("[YoroOS] fb %dx%d bpp=%d dual=%d rgbpos=%d,%d,%d rgbmask=%d,%d,%d", (int)fb.width, (int)fb.height, (int)fb.bpp, fb.dual, (int)fb.red_pos, (int)fb.green_pos, (int)fb.blue_pos, (int)fb.red_size, (int)fb.green_size, (int)fb.blue_size);

@@ -414,6 +414,22 @@ int  ata_read(int d, u32 lba, u32 count, u8 *buf);
 int  ata_write(int d, u32 lba, u32 count, const u8 *buf);
 int  ata_write_buffer(int d, u32 lba, const u8 *data, u32 bytes);
 
+/* ---------------- Win32 PE32 subsystem ---------------- */
+#define PE_ARENA_BASE 0x00400000u
+#define PE_ARENA_SIZE 0x00400000u
+
+typedef struct {
+    char dlls[8][24];
+    int  ndlls;
+    int  nimports;
+    int  relocs;
+} PeInfo;
+
+int  pe_is_pe(const u8 *data, int len);
+void pe_summary(const u8 *data, int len, char *out, int cap);
+/* map, relocate, bind imports and execute; returns 0 when the program ran */
+int  pe_run(const u8 *data, int len, char *log, int cap, int *exit_code);
+
 /* ---------------- compression ---------------- */
 int  inflate_raw(const u8 *in, int inlen, u8 *out, int outcap);
 
