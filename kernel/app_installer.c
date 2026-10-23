@@ -3,7 +3,8 @@
 
 #define BOOT_SECTOR_ADDR 0x7C00u
 #define STAGE2_ADDR      0x8000u
-#define STAGE2_SECTORS   48u
+#define STAGE2_LBA       4u
+#define STAGE2_SECTORS   4u   /* 2 KiB: what the boot sector + stage2 reload */
 #define KERNEL_ADDR      0x10000u
 #define KERNEL_LBA       128u
 
@@ -101,7 +102,7 @@ static void install_tick(void) {
             install_lba = 0;
         } else if (install_stage == 1) {
             const u8 *src = (const u8 *)STAGE2_ADDR;
-            if (ata_write(d, 1 + install_lba, 1, src + install_lba * 512) < 0) {
+            if (ata_write(d, STAGE2_LBA + install_lba, 1, src + install_lba * 512) < 0) {
                 install_error = 1; install_stage = 3; break;
             }
             install_lba++;

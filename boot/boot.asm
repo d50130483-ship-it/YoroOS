@@ -1,21 +1,31 @@
-/* YoroOS boot sector - 512 bytes, loaded by the BIOS at 0x7C00.
- * Loads stage2 (LBA 1..48) to 0x8000 and jumps to it. Uses int13h LBA
- * extensions when the BIOS has them, CHS with the reported geometry otherwise. */
+/* YoroOS boot sector - 512 bytes loaded by the BIOS at 0x7C00.
+ *
+ * Loads the first sector of stage2 and jumps to it; stage2 then pulls in the
+ * rest of itself.  Works for El Torito "no emulation" CDs (2048-byte sectors,
+ * image at ISO LBA 22), floppy emulation / real floppies and installed disks.
+ *
+ * stage2 starts at image sector 4 (byte 2048) so it is aligned for both
+ * sector sizes: LBA 4 on a 512-byte device, ISO LBA 23 on a CD.  Its first
+ * four bytes are the magic "YS2!" used here to verify reads and to find the
+ * CHS geometry of BIOSes without int13h extensions.
+ */
 .code16
 .intel_syntax noprefix
 .section .text, "ax"
 .globl _boot_start
 
-.equ DRIVE, 0x600
-.equ EXT,   0x601
-.equ RETRY, 0x602
-.equ LBA,   0x604
-.equ DEST,  0x608
-.equ COUNT, 0x60C
-.equ SPT,   0x610
-.equ HEADS, 0x612
-.equ TMP,   0x614
-.equ DAP,   0x620
+.equ DRIVE,   0x600
+.equ EXT,     0x601          /* 1 = int13h AH=42h works */
+.equ MODE,    0x602          /* 0 = 512-byte sectors, 1 = 2048-byte CD */
+.equ RETRY,   0x603
+.equ LBA,     0x604          /* word */
+.equ DEST,    0x608          /* word */
+.equ SPT,     0x610
+.equ HEADS,   0x612
+.equ TMP,     0x614
+.equ DAP,     0x620
+.equ SCRATCH, 0x3000
+.equ P,       0x540          /* boot parameters handed to stage2 */
 
 _boot_start:
     cli
@@ -27,32 +37,45 @@ _boot_start:
     sti
 
     mov     [DRIVE], dl
-    mov     byte ptr [RETRY], 0
     mov     word ptr [SPT], 0
-    mov     word ptr [HEADS], 0
 
     mov     si, offset msg_boot + 0x7C00
     call    print
 
-    mov     bx, 0x55AA               /* int13h extensions? */
-    mov     dl, [DRIVE]
-    mov     ah, 0x41
-    int     0x13
-    jc      .Lnoext
-    cmp     bx, 0xAA55
-    jne     .Lnoext
-    mov     byte ptr [EXT], 1
-    jmp     .Lstart
-.Lnoext:
-    mov     byte ptr [EXT], 0
+    /* EXT and MODE are adjacent, so one 16-bit write sets both. */
 
-.Lstart:
-    mov     dword ptr [LBA], 1
-    mov     dword ptr [DEST], 0x8000
-    mov     word ptr [COUNT], 48
-    call    read_sectors
-    jnc     start_stage2
+    /* 1) plain 512-byte device with int13h extensions (HDD, USB, disk) */
+    mov     word ptr [EXT], 0x0001
+    mov     word ptr [LBA], 4
+    call    probe_stage2
+    jnc     .Lfound
 
+    /* 2) El Torito "no emulation" CD: 2048-byte sectors, stage2 at ISO LBA 23 */
+    mov     word ptr [EXT], 0x0101             /* EXT = 1, MODE = 1 */
+    mov     word ptr [LBA], 23
+    call    probe_stage2
+    jnc     .Lfound
+
+    /* 3) floppy emulation: LBA 4 lives in the first track for every
+     *    geometry, so 18/2 (1.44M) always finds stage2.  Clearing the
+     *    EXT/MODE pair also resets the CD sector size set by attempt 2. */
+    mov     word ptr [EXT], 0
+    mov     word ptr [SPT], 18
+    mov     word ptr [HEADS], 2
+    mov     word ptr [LBA], 4
+    call    probe_stage2
+    jnc     .Lfound
+
+    /* 4) single-sided 1.44M El Torito emulation, then hard-disk geometry */
+    mov     word ptr [HEADS], 1
+    call    probe_stage2
+    jnc     .Lfound
+    mov     word ptr [SPT], 63
+    mov     word ptr [HEADS], 16
+    call    probe_stage2
+    jnc     .Lfound
+
+.Lfail:
     mov     si, offset msg_fail + 0x7C00
     call    print
     cli
@@ -60,10 +83,44 @@ _boot_start:
     hlt
     jmp     .Lhalt
 
-start_stage2:
+.Lfound:
+    /* ---- parameters for stage2 ---- */
+    mov     ax, 9
+    mov     cx, 4
+    mov     dword ptr [P + 4], 4                   /* stage2 LBA */
+    mov     dword ptr [P + 16], 128                /* kernel LBA */
+    cmp     byte ptr [MODE], 1
+    jne     .Lsave
+    mov     ax, 11
+    xor     cx, cx
+    mov     dword ptr [P + 4], 23
+    mov     dword ptr [P + 16], 54
+.Lsave:
+    mov     [P], ax                                /* sector shift */
+    movzx   ax, byte ptr [EXT]
+    mov     [P + 2], ax
+    mov     ax, [SPT]
+    mov     [P + 8], ax
+    mov     ax, [HEADS]
+    mov     [P + 10], ax
+    mov     [P + 12], cx                           /* stage2 sectors */
+
     .byte   0xEA
     .word   0x8000
     .word   0x0000
+
+/* read the first stage2 sector to 0x8000 and verify the magic */
+probe_stage2:
+    mov     word ptr [DEST], 0x8000
+    call    read_one
+    jc      .Lps_bad
+    cmp     dword ptr [0x8000], 0x21325359
+    jne     .Lps_bad
+    clc
+    ret
+.Lps_bad:
+    stc
+    ret
 
 print:
     pusha
@@ -79,83 +136,59 @@ print:
     popa
     ret
 
-/* cache the floppy/disk geometry in SPT and HEADS */
-read_geometry:
-    cmp     word ptr [SPT], 0
-    jne     .Ldone
-    mov     dl, [DRIVE]
-    mov     ah, 0x08
-    int     0x13
-    jc      .Ldef
-    movzx   ax, cl
-    and     ax, 0x3F
-    jz      .Ldef
-    mov     [SPT], ax
-    movzx   ax, dh
-    inc     ax
-    mov     [HEADS], ax
-.Ldone:
-    ret
-.Ldef:
-    mov     word ptr [SPT], 63
-    mov     word ptr [HEADS], 16
-    ret
-
-/* one sector at a time: LBA at LBA, destination linear at DEST, count at COUNT */
-read_sectors:
+/* read one sector from [LBA] to [DEST]; uses LBA when EXT=1, else CHS */
+read_one:
     pusha
     push    es
-.Lloop:
-    cmp     word ptr [COUNT], 0
-    je      .Lok_done
+    cmp     byte ptr [EXT], 0
+    je      .Lchs
 
-    cmp     byte ptr [EXT], 1
-    jne     .Lchs
-
-    /* --- LBA (int13h AH=42h) --- */
     mov     byte ptr [DAP], 16
     mov     byte ptr [DAP + 1], 0
     mov     word ptr [DAP + 2], 1
-    mov     eax, [DEST]
-    mov     ebx, eax
+    mov     ax, [DEST]
+    mov     bx, ax
     and     bx, 0x0F
     mov     [DAP + 4], bx
-    shr     eax, 4
+    shr     ax, 4
     mov     [DAP + 6], ax
-    mov     eax, [LBA]
-    mov     [DAP + 8], eax
-    mov     dword ptr [DAP + 12], 0
+    mov     ax, [LBA]
+    mov     [DAP + 8], ax
+    mov     word ptr [DAP + 10], 0
+    mov     word ptr [DAP + 12], 0
     mov     si, DAP
     mov     dl, [DRIVE]
     mov     ah, 0x42
     int     0x13
-    jnc     .Lok
+    jnc     .Lrok
     mov     byte ptr [EXT], 0
-    jmp     .Lloop
+    xor     ax, ax                  /* reset the drive after a failed LBA call */
+    mov     dl, [DRIVE]
+    int     0x13
+    jmp     .Lrfail
 
 .Lchs:
-    call    read_geometry
-    mov     eax, [LBA]
-    xor     edx, edx
-    movzx   ebx, word ptr [SPT]
-    test    ebx, ebx
-    jz      .Lfail
-    div     ebx
-    inc     dl
-    mov     [TMP], dx
-    xor     edx, edx
-    movzx   ebx, word ptr [HEADS]
-    test    ebx, ebx
-    jz      .Lfail
-    div     ebx
-    mov     [TMP + 2], dl
-    mov     [TMP + 4], ax
+    mov     bx, [SPT]
+    test    bx, bx
+    jz      .Lrfail
+    mov     ax, [LBA]
+    xor     dx, dx
+    div     bx
+    inc     dx
+    mov     [TMP], dx                              /* sector, 1-based */
+    mov     bx, [HEADS]
+    test    bx, bx
+    jz      .Lrfail
+    xor     dx, dx
+    div     bx
+    mov     [TMP + 2], dl                          /* head */
+    mov     [TMP + 4], ax                          /* cylinder */
 
-    mov     eax, [DEST]
-    mov     ebx, eax
+    mov     ax, [DEST]
+    mov     bx, ax
     and     bx, 0x0F
     mov     [TMP + 6], bx
-    shr     eax, 4
+    shr     ax, 4
     mov     es, ax
 
     mov     bx, [TMP + 6]
@@ -166,39 +199,27 @@ read_sectors:
     mov     dl, [DRIVE]
     mov     ax, 0x0201
     int     0x13
-    jnc     .Lok
+    jnc     .Lrok
+    jmp     .Lrfail
 
-    xor     ax, ax
-    mov     dl, [DRIVE]
-    int     0x13
-    inc     byte ptr [RETRY]
-    cmp     byte ptr [RETRY], 3
-    jb      .Lloop
-
-.Lfail:
+.Lrok:
+    pop     es
+    popa
+    clc
+    ret
+.Lrfail:
     pop     es
     popa
     stc
     ret
 
-.Lok:
-    mov     byte ptr [RETRY], 0
-    inc     dword ptr [LBA]
-    add     dword ptr [DEST], 512
-    dec     word ptr [COUNT]
-    jmp     .Lloop
+msg_boot: .asciz "YoroOS\n"
+msg_fail: .asciz "Boot err"
 
-.Lok_done:
-    pop     es
-    popa
-    clc
-    ret
-
-msg_boot: .asciz "YoroOS\r\n"
-msg_fail: .asciz "Boot error\r\n"
-
-/* kernel sector count patched by tools/mkimage.py (offset 0x1F0) */
+/* kernel sector count (512-byte units), patched by tools/mkimage.py */
 .org 0x1F0
 .word 0
+.org 0x1F8
+.byte 'Y', 'B', 'T', '0'
 .org 0x1FE
 .word 0xAA55

@@ -52,7 +52,9 @@ build/boot.bin: boot/boot.asm | build
 build/stage2.bin: boot/stage2.asm | build
 	$(AS) --32 $< -o build/stage2.o
 	$(OBJCOPY) -O binary -j .text build/stage2.o $@
-	@pytest=1; test $$(stat -c%s $@) -le 24576 || (echo "stage2 too big"; exit 1)
+	@test $$(stat -c%s $@) -le 2048 || (echo "stage2 must fit in the 2 KiB block the boot sector relies on"; exit 1)
+	@test $$((0x$$(nm build/stage2.o | awk '/ t stage2_main$$/ {print $$1}'))) -le 512 || \
+		(echo "stage2: self-loader must fit into the first sector"; exit 1)
 
 build/yoroos.img: build/boot.bin build/stage2.bin build/kernel.bin tools/mkimage.py
 	python3 tools/mkimage.py build/boot.bin build/stage2.bin build/kernel.bin $@

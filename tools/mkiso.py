@@ -42,10 +42,11 @@ def pad_sec(b):
 
 
 def main():
-    img_p, out_p, label = sys.argv[1], sys.argv[2], (sys.argv[3] if len(sys.argv) > 3 else "YOROOS")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    img_p, out_p, label = args[0], args[1], (args[2] if len(args) > 2 else "YOROOS")
     boot_image = open(img_p, "rb").read()
     extra = {}
-    for p in sys.argv[4:]:
+    for p in args[3:]:
         extra[os.path.basename(p).upper()] = open(p, "rb").read()
 
     now = time.gmtime()
@@ -128,19 +129,31 @@ def main():
 
     # ---- boot catalog ----
     cat = bytearray(SEC)
-    cat[0] = 1                    # validation entry
-    cat[1] = 0                    # x86
-    cat[4:28] = b"YOROOS BOOT".ljust(24)
+    cat[0] = 1                    # validation entry: header id
+    cat[1] = 0                    # platform id: 0 == 80x86
+    cat[2:4] = b"\0\0"            # reserved
+    cat[4:28] = b"YOROOS BOOT".ljust(24)          # id string
     cat[30] = 0x55
     cat[31] = 0xAA
-    cat[32] = 0x88
-    cat[33] = 2                   # 1.44MB floppy emulation
-    cat[38:40] = struct.pack("<H", 1)
+    # default boot entry (32..63)
+    noemu = "--noemu" in sys.argv
+    cat[32] = 0x88                # bootable
+    if noemu:
+        # no emulation: the BIOS sees 2048-byte CD sectors and a 0x7C00 load
+        cat[33] = 0
+        cat[34:36] = struct.pack("<H", 0x0000)
+        cat[38:40] = struct.pack("<H", 4)    # 4 x 512 bytes
+    else:
+        cat[33] = 2               # 1.44 MB floppy emulation
+        cat[34:36] = struct.pack("<H", 0x0000)
+        cat[38:40] = struct.pack("<H", 1)    # one 512-byte virtual sector
+    cat[36] = 0                   # system type
     cat[40:44] = struct.pack("<I", LBA_FILES)   # boot image LBA
-    s = 0
-    for i in range(0, 32, 2):
-        s = (s + struct.unpack("<H", cat[i:i + 2])[0]) & 0xFFFF
-    cat[28:30] = struct.pack("<H", (0x10000 - s) & 0xFFFF)
+    # validation entry checksum: the 16 words of the entry must sum to 0
+    cat[28:30] = b"\0\0"
+    total = sum(struct.unpack("<16H", bytes(cat[:32]))) & 0xFFFF
+    cat[28:30] = struct.pack("<H", (-total) & 0xFFFF)
+    assert sum(struct.unpack("<16H", bytes(cat[:32]))) & 0xFFFF == 0
 
     # ---- terminator ----
     term = bytearray(SEC)

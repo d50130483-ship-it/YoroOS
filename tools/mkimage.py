@@ -4,6 +4,7 @@
 import sys, os
 
 FLOPPY = 1474560
+STAGE2_LBA = 4
 KERNEL_LBA = 128
 KERNEL_DEST = 0x10000
 MAX_KERNEL = 0x8F000 - KERNEL_DEST
@@ -27,7 +28,7 @@ def main():
 
     img = bytearray(FLOPPY)
     img[0:512] = boot
-    img[512:512 + len(stage2)] = stage2
+    img[STAGE2_LBA * 512:STAGE2_LBA * 512 + len(stage2)] = stage2
     off = KERNEL_LBA * 512
     img[off:off + len(kernel)] = kernel
 
