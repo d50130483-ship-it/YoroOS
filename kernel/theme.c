@@ -58,10 +58,10 @@ static const char *const kWallNames[4] = {
 };
 
 static const char *const kEditions[4] = {
-    "YoroOS 0.2.1 Standard",
-    "YoroOS 0.2.1 Developer",
-    "YoroOS 0.2.1 Gaming",
-    "YoroOS 0.2.1 Lite",
+    "YoroOS 0.2.2 Standard",
+    "YoroOS 0.2.2 Developer",
+    "YoroOS 0.2.2 Gaming",
+    "YoroOS 0.2.2 Lite",
 };
 
 Theme *theme = &g_themes[0];

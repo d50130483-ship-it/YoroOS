@@ -1,4 +1,4 @@
-/* YoroOS 0.2.1 - Authentic Asynchronous Multi-Stage OS Disk Installer
+/* YoroOS 0.2.2 - Authentic Asynchronous Multi-Stage OS Disk Installer
  *
  * Original clean YoroOS UI (ZERO Windows cloning) with real incremental disk writes:
  *   Step 0 — Выбор диска и редакции (real hardware disk inspection + GPT/ESP layout)
@@ -24,6 +24,9 @@ static struct {
     int  user_len, user_caret;
     int  pc_len, pc_caret;
     int  auto_reboot_on;
+    int  lang_page;      /* 1 = первый экран «Язык и формат» (загрузочная среда) */
+    int  lang_val[3];    /* язык, формат времени, раскладка (индексы в списках) */
+    int  lang_open;      /* 0 = список закрыт, 1..3 = открыт выпадающий список строки */
     u32  finish_tick;
     u32  last_step_tick;
     DiskInstallTask task;
@@ -43,6 +46,11 @@ void installer_init_boot(void) {
     g_inst.user_caret = g_inst.user_len;
     g_inst.pc_len = (int)strlen(sys_profile.pc_name);
     g_inst.pc_caret = g_inst.pc_len;
+    g_inst.lang_page = (system_screen_mode == SCREEN_SETUP);
+    g_inst.lang_val[0] = 0;
+    g_inst.lang_val[1] = 0;
+    g_inst.lang_val[2] = kbd_is_ru() ? 0 : 1;
+    g_inst.lang_open = 0;
 }
 
 static void start_async_install(void) {
@@ -129,7 +137,7 @@ static void draw_wizard_body(Rect r) {
         int nd = hal_disk_count();
         char hw[160];
         icon_draw(ICON_SETUP, r.x + 28, r.y + 64, 40);
-        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.1", theme->text_main);
+        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.2", theme->text_main);
         snprintf(hw, sizeof(hw), "%s  ·  %s  ·  ОЗУ %u МБ",
                  hal_arch_name(), hal_pointer_driver_name(), (u32)hal_ram_mb());
         draw_text_small(r.x + 80, r.y + 90, hw, theme->text_muted);
@@ -296,7 +304,7 @@ static void draw_wizard_body(Rect r) {
 
         icon_draw(ICON_CHECK, r.x + r.w / 2 - 28, r.y + 74, 56);
         draw_text_center_face(FACE_TITLE, r.x + r.w / 2, r.y + 142,
-                              "YoroOS 0.2.1 успешно установлена на жёсткий диск!", theme->text_main);
+                              "YoroOS 0.2.2 успешно установлена на жёсткий диск!", theme->text_main);
         draw_text_center(r.x + r.w / 2, r.y + 178, g_inst.task.detail, theme->text_muted);
         draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 208,
                               "Загрузчик YoroBoot и раздел EFI FAT16 записаны и проверены посекторным чтением.",
@@ -408,7 +416,7 @@ static void handle_wizard_event(Rect r, YoroEvent *e) {
                 if (g_inst.win) { Window *w = g_inst.win; g_inst.win = NULL; wm_close(w); }
                 desktop_rebuild();
                 wm_invalidate();
-                toast("Добро пожаловать в установленную YoroOS 0.2.1!");
+                toast("Добро пожаловать в установленную YoroOS 0.2.2!");
                 return;
             }
             if (g_inst.auto_reboot_on && pt_in(e->x, e->y, (Rect){r.x + 294, r.y + r.h - 56, 200, 40})) {
@@ -424,20 +432,158 @@ static void handle_wizard_event(Rect r, YoroEvent *e) {
     }
 }
 
+/* ---- Первый экран загрузочной среды: язык, формат и раскладка ----
+ * Структура как у стандартного мастера установки: три поля выбора, подсказка
+ * и кнопка «Далее». Оформление оригинальное (логотип YoroOS, без логотипов сторонних систем). */
+static const char *kLangOpts[2] = { "Русский (Россия)", "English (United States)" };
+static const char *kKbdOpts[2]  = { "Русская", "English (US)" };
+static const char *kLangRowLbl[3] = {
+    "Устанавливаемый язык:",
+    "Формат времени и денежных единиц:",
+    "Метод ввода (раскладка клавиатуры):"
+};
+
+static Rect lang_dialog_rect(void) {
+    int w = 640, h = 380;
+    int fw = (int)fb.width, fh = (int)fb.height;
+    if (w > fw - 40) w = fw - 40;
+    if (h > fh - 40) h = fh - 40;
+    return (Rect){(fw - w) / 2, (fh - h) / 2, w, h};
+}
+
+static Rect lang_combo_rect(Rect d, int row) {
+    return (Rect){d.x + 344, d.y + 112 + row * 44, 256, 26};
+}
+
+static Rect lang_next_rect(Rect d) {
+    return (Rect){d.x + d.w - 170, d.y + d.h - 56, 140, 34};
+}
+
+static const char *lang_option_text(int row, int idx) {
+    return (row == 2) ? kKbdOpts[idx] : kLangOpts[idx];
+}
+
+static void lang_finish(void) {
+    int want_ru = (g_inst.lang_val[2] == 0);
+    if (want_ru != kbd_is_ru()) kbd_toggle_layout();
+    g_inst.lang_page = 0;
+    g_inst.lang_open = 0;
+    wm_invalidate();
+}
+
+static void draw_lang_page(void) {
+    Rect d = lang_dialog_rect();
+    Rect bar = {d.x, d.y, d.w, 32};
+    Rect nx = lang_next_rect(d);
+    Rect mark = {d.x + d.w / 2 - 104, d.y + 52, 44, 44};
+    int mx = mouse_get_x(), my = mouse_get_y();
+    int i, k;
+
+    fill_rect((Rect){0, 0, (int)fb.width, (int)fb.height}, RGB(28, 10, 92));
+    draw_shadow(d, 14);
+    fill_rect(d, RGB(34, 14, 104));
+    fill_rect(bar, RGB(22, 8, 74));
+    icon_draw(ICON_SETUP, d.x + 10, d.y + 6, 20);
+    draw_text_small(d.x + 38, d.y + 9, "Установка YoroOS", C_WHITE);
+
+    /* Оригинальный знак: скруглённый квадрат с буквой Y и название */
+    fill_round_rect(mark, 10, C_ACCENT);
+    draw_text_center_face(FACE_TITLE, mark.x + mark.w / 2, mark.y + 8, "Y", C_WHITE);
+    draw_text_hero(mark.x + mark.w + 14, mark.y + 4, "YoroOS", C_WHITE);
+
+    for (i = 0; i < 3; i++) {
+        Rect cb = lang_combo_rect(d, i);
+        int hov = pt_in(mx, my, cb);
+        draw_text_right(cb.x - 12, cb.y + 6, kLangRowLbl[i], RGB(232, 232, 250));
+        fill_rect(cb, (hov || g_inst.lang_open == i + 1) ? RGB(255, 255, 255) : RGB(246, 246, 250));
+        draw_text(cb.x + 8, cb.y + 6, lang_option_text(i, g_inst.lang_val[i]), RGB(20, 20, 30));
+        /* стрелка вниз */
+        for (k = 0; k < 5; k++) {
+            int ax = cb.x + cb.w - 14, ay = cb.y + 9;
+            hline(ax - (4 - k), ax + (4 - k), ay + k, RGB(50, 50, 64));
+        }
+    }
+
+    draw_text_center_face(FACE_SMALL, d.x + d.w / 2, d.y + 286,
+                          "Выберите нужный язык и другие параметры, затем нажмите «Далее».",
+                          RGB(225, 225, 245));
+
+    /* Выпадающий список поверх остального */
+    if (g_inst.lang_open) {
+        int row = g_inst.lang_open - 1;
+        Rect cb = lang_combo_rect(d, row);
+        int n = 2;
+        fill_rect((Rect){cb.x, cb.y + cb.h, cb.w, cb.h * n}, RGB(255, 255, 255));
+        for (i = 0; i < n; i++) {
+            Rect it = {cb.x, cb.y + cb.h + i * cb.h, cb.w, cb.h};
+            int sel = (g_inst.lang_val[row] == i);
+            int hov = pt_in(mx, my, it);
+            if (sel || hov) fill_rect(it, sel ? C_ACCENT : RGB(220, 230, 246));
+            draw_text(it.x + 8, it.y + 6, lang_option_text(row, i),
+                      sel ? C_WHITE : RGB(20, 20, 30));
+        }
+        draw_round_rect((Rect){cb.x, cb.y + cb.h, cb.w, cb.h * n}, 0, RGB(120, 120, 160));
+    }
+
+    /* Кнопка «Далее» и подпись */
+    {
+        int hov = pt_in(mx, my, nx);
+        fill_rect(nx, hov ? RGB(222, 222, 236) : RGB(244, 244, 250));
+        draw_round_rect(nx, 2, RGB(120, 120, 160));
+        draw_text_center_face(FACE_SMALL, nx.x + nx.w / 2, nx.y + 9, "Далее", RGB(20, 20, 30));
+    }
+    draw_text_small(d.x + 24, d.y + d.h - 24, "© YoroOS 0.2.2. Все права защищены.", RGB(176, 176, 210));
+}
+
+static void handle_lang_event(YoroEvent *e) {
+    Rect d = lang_dialog_rect();
+    int i;
+    if (e->type == EV_KEY) {
+        if (e->key == KEY_ESC && g_inst.lang_open) { g_inst.lang_open = 0; wm_invalidate(); return; }
+        if (e->key == KEY_ENTER) { lang_finish(); return; }
+        return;
+    }
+    if (e->type != EV_MOUSE_DOWN || e->btn != 1) return;
+
+    if (g_inst.lang_open) {
+        int row = g_inst.lang_open - 1;
+        Rect cb = lang_combo_rect(d, row);
+        for (i = 0; i < 2; i++) {
+            Rect it = {cb.x, cb.y + cb.h + i * cb.h, cb.w, cb.h};
+            if (pt_in(e->x, e->y, it)) { g_inst.lang_val[row] = i; break; }
+        }
+        g_inst.lang_open = 0;
+        wm_invalidate();
+        return;
+    }
+    for (i = 0; i < 3; i++) {
+        if (pt_in(e->x, e->y, lang_combo_rect(d, i))) {
+            g_inst.lang_open = i + 1;
+            wm_invalidate();
+            return;
+        }
+    }
+    if (pt_in(e->x, e->y, lang_next_rect(d))) lang_finish();
+}
+
 void installer_draw_fullscreen(void) {
-    Rect dlg = boot_dialog_rect();
-    Rect frame = {dlg.x, dlg.y - 34, dlg.w, dlg.h + 34};
+    Rect dlg;
+    Rect frame;
+    if (g_inst.lang_page) { draw_lang_page(); return; }
+    dlg = boot_dialog_rect();
+    frame = (Rect){dlg.x, dlg.y - 34, dlg.w, dlg.h + 34};
 
     theme_draw_wallpaper();
     draw_shadow(frame, 16);
     fill_round_rect(frame, 10, theme->win_head);
     icon_draw(ICON_SETUP, frame.x + 12, frame.y + 7, 20);
-    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.1 — Мастер установки системы", theme->text_main);
+    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.2 — Мастер установки системы", theme->text_main);
     draw_wizard_body(dlg);
     draw_round_rect(frame, 10, RGBA(148, 163, 184, 75));
 }
 
 void installer_event_fullscreen(YoroEvent *e) {
+    if (g_inst.lang_page) { handle_lang_event(e); return; }
     handle_wizard_event(boot_dialog_rect(), e);
 }
 
@@ -448,6 +594,7 @@ static void win_inst_close(Window *w) { UNUSED(w); disk_install_free(&g_inst.tas
 void installer_open(void) {
     if (g_inst.win) { wm_focus(g_inst.win); return; }
     installer_init_boot();
+    g_inst.lang_page = 0;
     g_inst.win = wm_open(app_find("installer"), "Установка YoroOS на диск",
                          -1, -1, 820, 560, win_inst_draw, win_inst_ev, win_inst_close);
 }

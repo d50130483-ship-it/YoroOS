@@ -1,4 +1,4 @@
-/* YoroOS 0.2.1 - Native Bare-Metal Microsoft Hyper-V Generation 2 Driver Stack
+/* YoroOS 0.2.2 - Native Bare-Metal Microsoft Hyper-V Generation 2 Driver Stack
  *
  * Implements full x86-64/x86 bare-metal Hyper-V enlightenment after ExitBootServices():
  *   - CPUID Hypervisor Detection + Hypercall Page + SynIC (SIMP / SIEFP / SINT2 / EOM)
