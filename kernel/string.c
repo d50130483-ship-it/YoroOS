@@ -186,7 +186,7 @@ void itoa(int v, char *buf) {
 int vsnprintf(char *buf, size_t n, const char *fmt, va_list ap) {
     size_t pos = 0;
     if (!buf || n == 0) return 0;
-    #define PUT(ch) do { if (pos + 1 < n) buf[pos] = (ch); pos++; } while (0)
+    #define PUT(ch) do { char _put_c = (ch); if (pos + 1 < n) buf[pos] = _put_c; pos++; } while (0)
 
     while (*fmt) {
         int left = 0, zpad = 0, width = 0, prec = -1, is_ll = 0;

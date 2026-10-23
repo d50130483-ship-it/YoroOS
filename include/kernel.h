@@ -22,9 +22,9 @@ typedef uintptr_t uptr;
 
 #define UNUSED(x) (void)(x)
 
-#define YORO_VERSION_STR   "0.2.0"
+#define YORO_VERSION_STR   "0.2.1"
 #define YORO_CODENAME      "Aurora"
-#define YORO_BUILD_STR     "0.2.2610.23"
+#define YORO_BUILD_STR     "0.2.1.2610"
 
 /* ---------------- string / memory ---------------- */
 void  *memset(void *d, int c, size_t n);
@@ -258,6 +258,9 @@ int   hal_disk_read(int idx, u64 lba512, u32 count512, void *buf);
 int   hal_disk_write(int idx, u64 lba512, u32 count512, const void *buf);
 int   hal_boot_media_read(u64 lba512, u32 count512, void *buf);
 void  hal_disk_rescan(void);
+const u8 *hal_self_efi_bytes(u32 *out_len);
+const u8 *hal_bios_img_bytes(u32 *out_len);
+int   hal_register_nvram_boot(const u8 part_guid[16], u64 esp_start_lba, u64 esp_sectors);
 
 int   mouse_get_x(void);
 int   mouse_get_y(void);
@@ -354,8 +357,36 @@ int    fs_total_nodes(void);
 void  fs_seed(void);
 void  fs_open_any_file(int node);    /* Universal Windows file dispatcher! */
 
-/* Persistent Disk Formatting & YoroFS2 Sync (diskfmt.c) */
+/* Persistent Disk Formatting, Pure-C FAT16 ESP Builder & Live Async OS Installer (diskfmt.c) */
 typedef void (*InstallProgressFn)(int pct, const char *stage_msg);
+
+typedef struct {
+    int  active;
+    int  done;
+    int  failed;
+    int  phase;
+    int  disk_idx;
+    int  pct;
+    int  nvram_ok;
+    u64  custom_c_mb;
+    u64  total_lba;
+    u64  last_usable;
+    u64  c_end_lba;
+    u64  bytes_written;
+    u32  cursor_sec;
+    u32  total_phase_sec;
+    u8  *esp_img;        /* 16 MiB pure-C formatted FAT16 EFI System Partition image */
+    u32  esp_sectors;
+    u8   part1_guid[16];
+    char status[160];
+    char detail[160];
+    char err[160];
+} DiskInstallTask;
+
+int   disk_install_begin(DiskInstallTask *t, int disk_idx, u64 custom_c_size_mb);
+int   disk_install_step(DiskInstallTask *t);   /* returns 1 while running, 0 when finished/failed */
+void  disk_install_free(DiskInstallTask *t);
+
 int   disk_install_yoroos(int disk_idx, u64 custom_c_size_mb, InstallProgressFn cb, char *err_buf, int err_cap);
 int   disk_save_yorofs(int disk_idx);
 int   disk_load_yorofs(int disk_idx);

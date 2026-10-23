@@ -64,10 +64,17 @@ static void detect_cpu32(void) {
 
 const char *hal_arch_name(void) { return "x86 (BIOS / Generation 1)"; }
 const char *hal_cpu_brand(void) { return g_cpu_brand; }
-const char *hal_pointer_driver_name(void) { return "PS/2 i8042 Mouse + IRQ12"; }
+static int g_vmmouse_used_label(void);
+const char *hal_pointer_driver_name(void) { return g_vmmouse_used_label() ? "VMware/QEMU Absolute Mouse + PS/2" : "PS/2 i8042 Mouse + IRQ12"; }
 u64 hal_ram_mb(void) { return MEMKB ? (u64)(MEMKB / 1024U) : 256ULL; }
 int hal_is_uefi(void) { return 0; }
 int hal_booted_from_disk(void) { return (BOOTDRIVE >= 0x80 && BOOTDRIVE < 0x90) ? 1 : 0; }
+const u8 *hal_self_efi_bytes(u32 *out_len) { if (out_len) *out_len = 0; return NULL; }
+const u8 *hal_bios_img_bytes(u32 *out_len) { if (out_len) *out_len = 0; return NULL; }
+int hal_register_nvram_boot(const u8 part_guid[16], u64 esp_start_lba, u64 esp_sectors) {
+    UNUSED(part_guid); UNUSED(esp_start_lba); UNUSED(esp_sectors);
+    return -1;
+}
 
 static void gdt_set(int i, u32 base, u32 limit, u8 access, u8 gran) {
     gdt[i].base_low = base & 0xFFFF;
@@ -349,9 +356,78 @@ int mouse_get_y(void) { return mouse_y; }
 int mouse_state(void) { return mouse_btn_state; }
 void mouse_set_pos(int x, int y) { mouse_x = x; mouse_y = y; }
 
+static int g_vmmouse_ok = 0;
+static int g_vmmouse_used_label(void) { return g_vmmouse_ok; }
+
+/* Safe hypervisor CPUID check before probing VMware/QEMU port 0x5658 */
+static void vmmouse_try_init(void) {
+    u32 eax = 0, ebx = 0, ecx = 0, edx = 0;
+    __asm__ volatile("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1U));
+    if (!(ecx & (1U << 31))) return; /* Real bare-metal CPU without hypervisor -> skip 0x5658 */
+
+    /* CMD_GETVERSION (10) on VMware/QEMU backdoor 0x5658 */
+    eax = 0x564D5868U; ebx = 0; ecx = 10; edx = 0x5658;
+    __asm__ volatile("inl %%dx, %%eax" : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx) :: "memory");
+    if (ebx != 0x564D5868U) return;
+
+    /* Enable VMMOUSE: ABSPOINTER_COMMAND (39) = READ_ID (0x45414552), pop 1 status, REQUEST_ABSOLUTE (0x53424152) */
+    eax = 0x564D5868U; ebx = 0x45414552U; ecx = 39; edx = 0x5658;
+    __asm__ volatile("inl %%dx, %%eax" : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx) :: "memory");
+    eax = 0x564D5868U; ebx = 1; ecx = 40; edx = 0x5658;
+    __asm__ volatile("inl %%dx, %%eax" : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx) :: "memory");
+    eax = 0x564D5868U; ebx = 0x53424152U; ecx = 39; edx = 0x5658;
+    __asm__ volatile("inl %%dx, %%eax" : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx) :: "memory");
+    g_vmmouse_ok = 1;
+}
+
+static void vmmouse_poll(void) {
+    int guard = 16;
+    if (!g_vmmouse_ok) return;
+    while (guard-- > 0) {
+        u32 eax = 0x564D5868U, ebx = 0, ecx = 41 /* ABSPOINTER_STATUS */, edx = 0x5658;
+        __asm__ volatile("inl %%dx, %%eax" : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx) :: "memory");
+        if ((eax & 0xFFFF0000U) == 0xFFFF0000U || (eax & 0xFFFFU) < 4U) break;
+
+        eax = 0x564D5868U; ebx = 4; ecx = 40 /* ABSPOINTER_DATA */; edx = 0x5658;
+        __asm__ volatile("inl %%dx, %%eax" : "+a"(eax), "+b"(ebx), "+c"(ecx), "+d"(edx) :: "memory");
+        {
+            int btns = ((eax & 0x20U) ? 1 : 0) | ((eax & 0x10U) ? 2 : 0) | ((eax & 0x08U) ? 4 : 0);
+            int nx = (int)(((u64)(ebx & 0xFFFFU) * (u64)(fb.width  > 1 ? fb.width  - 1 : 0)) / 65535ULL);
+            int ny = (int)(((u64)(ecx & 0xFFFFU) * (u64)(fb.height > 1 ? fb.height - 1 : 0)) / 65535ULL);
+            i8 wh = (i8)(edx & 0xFFU);
+            YoroEvent ev;
+            if (nx != mouse_x || ny != mouse_y) {
+                mouse_x = nx; mouse_y = ny;
+                memset(&ev, 0, sizeof(ev));
+                ev.type = EV_MOUSE_MOVE; ev.x = nx; ev.y = ny;
+                input_push(&ev);
+            }
+            if ((btns & 1) != (mouse_btn_state & 1)) {
+                memset(&ev, 0, sizeof(ev));
+                ev.type = (btns & 1) ? EV_MOUSE_DOWN : EV_MOUSE_UP;
+                ev.btn = 1; ev.x = nx; ev.y = ny;
+                input_push(&ev);
+            }
+            if ((btns & 2) != (mouse_btn_state & 2)) {
+                memset(&ev, 0, sizeof(ev));
+                ev.type = (btns & 2) ? EV_MOUSE_DOWN : EV_MOUSE_UP;
+                ev.btn = 2; ev.x = nx; ev.y = ny;
+                input_push(&ev);
+            }
+            mouse_btn_state = btns;
+            if (wh != 0) {
+                memset(&ev, 0, sizeof(ev));
+                ev.type = EV_WHEEL; ev.wheel = -wh; ev.x = nx; ev.y = ny;
+                input_push(&ev);
+            }
+        }
+    }
+}
+
 void hal_poll_input(void) {
     int guard = 32;
     cli();
+    vmmouse_poll();
     while (guard-- > 0) {
         u8 st = inb(0x64);
         if (!(st & 0x01)) break;
@@ -621,6 +697,7 @@ void kmain(void) {
 
     gfx_init();
     mouse_init_hw();
+    vmmouse_try_init();
     ata_init();
 
     sti();

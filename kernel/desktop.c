@@ -63,13 +63,13 @@ void desktop_rebuild(void) {
     int i, ddir, cnt;
     g_nitems = 0;
 
-    /* 1. This PC */
+    /* 1. Files / Root Storage */
     g_items[g_nitems].kind = 0;
     g_items[g_nitems].icon = ICON_COMPUTER;
-    strcpy(g_items[g_nitems].label, "Этот компьютер");
+    strcpy(g_items[g_nitems].label, "Файлы");
     g_nitems++;
 
-    /* 2. Recycle Bin */
+    /* 2. Trash */
     g_items[g_nitems].kind = 1;
     g_items[g_nitems].icon = fs_count(fs_trash_dir()) > 0 ? ICON_TRASH : ICON_TRASH_EMPTY;
     strcpy(g_items[g_nitems].label, "Корзина");
@@ -159,24 +159,24 @@ void desktop_draw(void) {
     int i;
     theme_draw_wallpaper();
 
-    /* Draw Windows 10/11 Desktop Icon Grid */
+    /* Draw Clean YoroOS Desktop Icon Grid (crisp 1:1 48x48 supersampled RGBA sprites!) */
     for (i = 0; i < g_nitems; i++) {
         Rect cell = desk_cell_rect(i);
         int hov = pt_in(mx, my, cell);
         if (desktop_selected == i) {
-            fill_round_rect_alpha(cell, 6, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 88));
-            draw_round_rect(cell, 6, RGBA(255, 255, 255, 110));
+            fill_round_rect_alpha(cell, 8, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 84));
+            draw_round_rect(cell, 8, RGBA(255, 255, 255, 105));
         } else if (hov) {
-            fill_round_rect_alpha(cell, 6, RGBA(255, 255, 255, 34));
+            fill_round_rect_alpha(cell, 8, RGBA(255, 255, 255, 30));
         }
-        icon_draw(g_items[i].icon, cell.x + (cell.w - 40) / 2, cell.y + 6, 40);
+        icon_draw(g_items[i].icon, cell.x + (cell.w - 48) / 2, cell.y + 4, 48);
 
         /* Crisp pixel-measured UTF-8 label with subtle drop shadow */
         {
             char lbl[64];
-            fit_utf8_label(g_items[i].label, cell.w - 4, lbl, sizeof(lbl));
-            draw_text_center_face(FACE_SMALL, cell.x + cell.w / 2 + 1, cell.y + 53, lbl, RGBA(0, 0, 0, 210));
-            draw_text_center_face(FACE_SMALL, cell.x + cell.w / 2,     cell.y + 52, lbl, C_WHITE);
+            fit_utf8_label(g_items[i].label, cell.w + 4, lbl, sizeof(lbl));
+            draw_text_center_face(FACE_SMALL, cell.x + cell.w / 2 + 1, cell.y + 57, lbl, RGBA(0, 0, 0, 215));
+            draw_text_center_face(FACE_SMALL, cell.x + cell.w / 2,     cell.y + 56, lbl, C_WHITE);
         }
     }
 }
@@ -248,7 +248,7 @@ static void draw_start_menu(int mx, int my) {
                 ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 70)
                 : theme->card_bg);
             draw_round_rect(tile, 7, hov ? theme->accent : RGBA(130, 145, 170, 52));
-            icon_draw(a->icon, tile.x + (tile.w - 30) / 2, tile.y + 9, 30);
+            icon_draw(a->icon, tile.x + (tile.w - 28) / 2, tile.y + 10, 28);
             {
                 char tlbl[64];
                 fit_utf8_label(a->name, tile.w - 10, tlbl, sizeof(tlbl));
@@ -310,14 +310,14 @@ void desktop_draw_overlay(void) {
     char tbuf[32], dbuf[32];
     static const char *pins[] = { "explorer", "browser", "store", "terminal", "settings" };
 
-    /* 1. Translucent Frosted Acrylic Windows 10/11 Taskbar */
+    /* 1. Translucent Frosted YoroOS Dock / Taskbar */
     fx_blur_rect(tb, 8, theme->task_bg);
     hline(0, (int)fb.width - 1, tb.y, RGBA(255, 255, 255, 36));
 
-    /* Start Button */
+    /* YoroOS Menu Button (1:1 28x28 supersampled emblem) */
     if (pt_in(mx, my, start_btn) || g_start_open)
-        fill_round_rect_alpha(start_btn, 6, RGBA(255, 255, 255, 34));
-    icon_draw(ICON_ABOUT, start_btn.x + 9, start_btn.y + 7, 24);
+        fill_round_rect_alpha(start_btn, 8, RGBA(255, 255, 255, 34));
+    icon_draw(ICON_ABOUT, start_btn.x + 7, start_btn.y + 5, 28);
 
     /* Search Pill */
     fill_round_rect_alpha(search_pill, 16, RGBA(255, 255, 255, 24));
@@ -326,14 +326,14 @@ void desktop_draw_overlay(void) {
     draw_text_small(search_pill.x + 34, search_pill.y + (search_pill.h - font_line_height(FACE_SMALL)) / 2,
                     "Поиск в YoroOS...", RGBA(230, 238, 250, 205));
 
-    /* Pinned Quick-Launch Icons */
+    /* Pinned Quick-Launch Icons (1:1 28x28 supersampled sprites) */
     x = search_pill.x + search_pill.w + 10;
     for (i = 0; i < 5; i++) {
         App *a = app_find(pins[i]);
         Rect b = {x, tb.y + 4, 40, th - 8};
         if (!a) continue;
-        if (pt_in(mx, my, b)) fill_round_rect_alpha(b, 6, RGBA(255, 255, 255, 30));
-        icon_draw(a->icon, b.x + 7, b.y + 6, 26);
+        if (pt_in(mx, my, b)) fill_round_rect_alpha(b, 8, RGBA(255, 255, 255, 30));
+        icon_draw(a->icon, b.x + 6, b.y + 5, 28);
         x += 44;
     }
 

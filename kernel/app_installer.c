@@ -1,47 +1,43 @@
-/* YoroOS 0.2 - Serious Windows 10/11 Multi-Step Graphical Windowed OS Installer
+/* YoroOS 0.2.1 - Authentic Asynchronous Multi-Stage OS Disk Installer
  *
- * Works seamlessly BOTH:
- *   1) At boot time from YoroOS-0.2.0.iso (SCREEN_SETUP fullscreen Setup Environment
- *      with real Windows Setup dialog window, Shift+F10 repair shell, and 1-click Live Desktop option)
- *   2) Inside a desktop Window* anytime the user opens "Установка YoroOS" from Desktop/Start Menu!
+ * Original clean YoroOS UI (ZERO Windows cloning) with real incremental disk writes:
+ *   Step 0 — Выбор диска и редакции (real hardware disk inspection + GPT/ESP layout)
+ *   Step 1 — Профиль и оформление (user, hostname, wallpaper, theme saved into disk image!)
+ *   Step 2 — Пошаговая запись на диск (real 60 FPS async GPT + FAT16 ESP + Kernel + YoroFS2 + CRC32!)
+ *   Step 3 — Завершение и перезагрузка с жёсткого диска (auto-reboot timer + 1-click reboot)
  */
 #include "kernel.h"
 
 enum {
-    STEP_WELCOME   = 0,
-    STEP_LICENSE   = 1,
-    STEP_DISKS     = 2,
-    STEP_INSTALL   = 3,
-    STEP_OOBE      = 4,
-    STEP_FINISH    = 5
+    INST_DISKS   = 0,
+    INST_PROFILE = 1,
+    INST_WRITE   = 2,
+    INST_DONE    = 3
 };
 
 static struct {
     int  step;
-    int  lang;           /* 0 = Русский, 1 = English */
-    int  edition;        /* EDITION_PRO..EDITION_HOME */
-    int  license_ok;
+    int  edition;
     int  sel_disk;
-    int  part_formatted; /* user created/formatted GPT layout in disk manager UI */
-    u64  c_size_mb;      /* 0 = entire disk */
-    int  install_pct;
-    char install_msg[128];
-    char err_msg[128];
-    int  install_started;
-    int  install_done;
-    int  focus_field;    /* 0 = username, 1 = pc_name */
+    u64  c_size_mb;
+    int  focus_field; /* 0 = username, 1 = pc_name */
     int  user_len, user_caret;
     int  pc_len, pc_caret;
+    int  auto_reboot_on;
+    u32  finish_tick;
+    u32  last_step_tick;
+    DiskInstallTask task;
     Window *win;
 } g_inst;
 
-int installer_running(void) { return system_screen_mode == SCREEN_SETUP || g_inst.win != NULL; }
+int installer_running(void) {
+    return system_screen_mode == SCREEN_SETUP || g_inst.win != NULL;
+}
 
 void installer_init_boot(void) {
     memset(&g_inst, 0, sizeof(g_inst));
-    g_inst.step = STEP_WELCOME;
+    g_inst.step = INST_DISKS;
     g_inst.edition = sys_profile.edition;
-    g_inst.license_ok = 1;
     g_inst.sel_disk = 0;
     g_inst.user_len = (int)strlen(sys_profile.username);
     g_inst.user_caret = g_inst.user_len;
@@ -49,377 +45,334 @@ void installer_init_boot(void) {
     g_inst.pc_caret = g_inst.pc_len;
 }
 
-static void on_install_progress(int pct, const char *msg) {
-    g_inst.install_pct = pct;
-    if (msg) {
-        strncpy(g_inst.install_msg, msg, sizeof(g_inst.install_msg) - 1);
-        g_inst.install_msg[sizeof(g_inst.install_msg) - 1] = 0;
-    }
-    wm_frame();
-}
+static void start_async_install(void) {
+    sys_profile.edition = g_inst.edition;
+    if (!sys_profile.username[0]) strcpy(sys_profile.username, "User");
+    if (!sys_profile.pc_name[0])  strcpy(sys_profile.pc_name, "YORO-PC");
 
-static void run_disk_installation(void) {
-    g_inst.install_started = 1;
-    g_inst.err_msg[0] = 0;
-    apps_init();
+    g_inst.step = INST_WRITE;
+    g_inst.last_step_tick = sys_ticks();
 
     if (hal_disk_count() <= 0) {
-        /* Graceful Live RAM installation if VM has 0 virtual disks attached */
-        on_install_progress(35, "Виртуальный жёсткий диск не подключён — настройка RAM-тома YoroFS2...");
-        sys_profile.edition = g_inst.edition;
+        memset(&g_inst.task, 0, sizeof(g_inst.task));
         sys_profile.setup_completed = 1;
-        on_install_progress(100, "Система настроена в оперативной памяти (подключите VHDX для записи на диск).");
-        g_inst.install_done = 1;
-        g_inst.step = STEP_OOBE;
+        apps_init();
+        g_inst.task.pct = 100;
+        g_inst.task.done = 1;
+        strcpy(g_inst.task.status, "Настроена RAM-система (подключите диск VHDX для постоянной установки).");
+        strcpy(g_inst.task.detail, "Все функции рабочего стола готовы к работе.");
+        g_inst.step = INST_DONE;
+        g_inst.auto_reboot_on = 0;
+        wm_invalidate();
         return;
     }
 
-    sys_profile.edition = g_inst.edition;
-    if (disk_install_yoroos(g_inst.sel_disk, g_inst.c_size_mb, on_install_progress,
-                            g_inst.err_msg, sizeof(g_inst.err_msg)) == 0) {
-        g_inst.install_done = 1;
-        g_inst.step = STEP_OOBE;
-    }
+    disk_install_begin(&g_inst.task, g_inst.sel_disk, g_inst.c_size_mb);
     wm_invalidate();
 }
 
 void installer_tick(void) {
-    if (g_inst.step == STEP_INSTALL && !g_inst.install_started)
-        run_disk_installation();
+    u32 now = sys_ticks();
+
+    if (g_inst.step == INST_WRITE && g_inst.task.active) {
+        /* Space out steps ~80ms so user visibly sees every real hardware phase & MB counter! */
+        if (now - g_inst.last_step_tick >= 8U) {
+            g_inst.last_step_tick = now;
+            if (!disk_install_step(&g_inst.task)) {
+                if (g_inst.task.done) {
+                    g_inst.step = INST_DONE;
+                    g_inst.finish_tick = now;
+                    g_inst.auto_reboot_on = (hal_disk_count() > 0 && system_screen_mode == SCREEN_SETUP) ? 1 : 0;
+                    desktop_rebuild();
+                }
+            }
+            wm_invalidate();
+        }
+    } else if (g_inst.step == INST_DONE && g_inst.auto_reboot_on) {
+        wm_dirty = 1;
+        if (now - g_inst.finish_tick >= 600U) { /* 6.0 seconds */
+            g_inst.auto_reboot_on = 0;
+            system_reboot();
+        }
+    }
 }
 
 static Rect boot_dialog_rect(void) {
     int w = 820, h = 530;
     if (w > (int)fb.width - 40) w = (int)fb.width - 40;
-    if (h > (int)fb.height - 60) h = (int)fb.height - 60;
-    return (Rect){((int)fb.width - w) / 2, ((int)fb.height - h) / 2 - 10, w, h};
+    if (h > (int)fb.height - 56) h = (int)fb.height - 56;
+    return (Rect){((int)fb.width - w) / 2, ((int)fb.height - h) / 2, w, h};
 }
 
 static void draw_wizard_body(Rect r) {
-    int mx = mouse_get_x(), my = mouse_get_y();
-    static const char *step_names[6] = {
-        "1. Редакция", "2. Лицензия", "3. Разделы GPT", "4. Установка", "5. Профиль", "6. Готово"
+    static const char *kSteps[4] = {
+        "1. Накопитель", "2. Профиль", "3. Запись на диск", "4. Перезагрузка"
     };
-    int i, bx;
+    int mx = mouse_get_x(), my = mouse_get_y();
+    int i, sw = (r.w - 40) / 4;
 
-    /* Clean modern Windows 11 Setup light/fluent surface */
     fill_rect(r, theme->win_bg);
+    fill_rect((Rect){r.x, r.y, r.w, 50}, theme->card_bg);
+    hline(r.x, r.x + r.w - 1, r.y + 50, RGBA(148, 163, 184, 55));
 
-    /* Top Step Progress Header */
-    fill_rect((Rect){r.x, r.y, r.w, 48}, theme->card_bg);
-    hline(r.x, r.x + r.w - 1, r.y + 48, RGBA(130, 145, 170, 65));
-    bx = r.x + 18;
-    for (i = 0; i < 6; i++) {
-        int active = (i == g_inst.step);
-        int done = (i < g_inst.step);
-        Rect pill = {bx, r.y + 11, (r.w - 36) / 6 - 6, 26};
-        fill_round_rect(pill, 13, active ? theme->accent
-                                         : (done ? RGBA(16, 152, 92, 55) : RGBA(130, 145, 170, 26)));
-        draw_text_center_face(FACE_SMALL, pill.x + pill.w / 2, pill.y + 5, step_names[i],
-                              active ? C_WHITE : theme->text_main);
-        bx += (r.w - 36) / 6;
+    for (i = 0; i < 4; i++) {
+        Rect pill = {r.x + 20 + i * sw, r.y + 11, sw - 8, 28};
+        int cur = (i == g_inst.step);
+        int done = (i < g_inst.step) || (g_inst.step == INST_DONE && i <= 3);
+        fill_round_rect(pill, 14, cur ? theme->accent
+                                      : (done ? RGBA(16, 185, 129, 56) : RGBA(148, 163, 184, 24)));
+        draw_text_center_face(FACE_SMALL, pill.x + pill.w / 2, pill.y + 6, kSteps[i],
+                              cur ? C_WHITE : theme->text_main);
     }
 
-    if (g_inst.step == STEP_WELCOME) {
-        static const char *ed_desc[4] = {
-            "Полная рабочая система Windows-класса: Проводник, Терминал, Win32 .EXE, .ZIP, Браузер.",
-            "Предустановлены Python 3.12 IDE, Visual Studio Code и Git Bash для разработки.",
-            "Предустановлены игровой клиент Steam, Discord и ультра-быстрый Matronix Browser 3.0.",
-            "Лёгкая, чистая и быстрая домашняя редакция без лишних фоновых служб."
-        };
-        char hw[160];
-        icon_draw(ICON_ABOUT, r.x + 28, r.y + 64, 42);
-        draw_text_title(r.x + 82, r.y + 62, "Установка YoroOS 0.2 «Aurora»", theme->text_main);
-        snprintf(hw, sizeof(hw), "Оборудование: %s  ·  Ввод: %s  ·  ОЗУ: %u МБ",
-                 hal_arch_name(), hal_pointer_driver_name(), (u32)hal_ram_mb());
-        draw_text_small(r.x + 82, r.y + 92, hw, theme->text_muted);
-
-        draw_text_bold(r.x + 28, r.y + 124, "Выберите редакцию операционной системы и раскладку:", theme->text_main);
-        for (i = 0; i < 4; i++) {
-            Rect card = {r.x + 28, r.y + 152 + i * 58, r.w - 56, 52};
-            int sel = (g_inst.edition == i);
-            fill_round_rect(card, 7, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 48) : theme->card_bg);
-            draw_round_rect(card, 7, sel ? theme->accent : RGBA(130, 145, 170, 60));
-            fill_circle(card.x + 20, card.y + 26, 7, sel ? theme->accent : RGBA(130, 145, 170, 90));
-            if (sel) fill_circle(card.x + 20, card.y + 26, 3, C_WHITE);
-            draw_text_bold(card.x + 38, card.y + 7, edition_name(i), theme->text_main);
-            draw_text_small(card.x + 38, card.y + 29, ed_desc[i], theme->text_muted);
-        }
-
-        ui_button((Rect){r.x + 28, r.y + r.h - 52, 230, 38},
-                  kbd_is_ru() ? "Раскладка: Русская (RU)" : "Layout: English (US)",
-                  pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 52, 230, 38}), 0);
-        if (system_screen_mode == SCREEN_SETUP) {
-            ui_button((Rect){r.x + 270, r.y + r.h - 52, 270, 38},
-                      "Live-режим (Рабочий стол)",
-                      pt_in(mx, my, (Rect){r.x + 270, r.y + r.h - 52, 270, 38}), 0);
-        }
-        ui_button((Rect){r.x + r.w - 246, r.y + r.h - 52, 218, 38},
-                  "Установить сейчас ->",
-                  pt_in(mx, my, (Rect){r.x + r.w - 246, r.y + r.h - 52, 218, 38}), 1);
-    }
-    else if (g_inst.step == STEP_LICENSE) {
-        Rect box = {r.x + 28, r.y + 106, r.w - 56, r.h - 216};
-        static const char *lines[] = {
-            "ЛИЦЕНЗИОННОЕ СОГЛАШЕНИЕ СВОБОДНОГО ПОЛЬЗОВАТЕЛЯ YOROOS 0.2 «AURORA»",
-            "",
-            "1. ПОДДЕРЖКА ПОКОЛЕНИЯ 2 (UEFI x86-64 / HYPER-V GEN 2) И BIOS:",
-            "   YoroOS нативно работает на виртуальных машинах Hyper-V Поколения 2 (VMBus мышь, GOP 32bpp,",
-            "   таблица разделов GPT, системный раздел EFI FAT16), а также на классическом оборудовании BIOS.",
-            "",
-            "2. ПРИНЦИП АБСОЛЮТНОЙ СВОБОДЫ ФАЙЛОВОЙ СИСТЕМЫ:",
-            "   В отличие от Microsoft Windows, YoroOS НЕ БЛОКИРУЕТ владельца компьютера сообщениями",
-            "   «Отказано в доступе / запросите разрешение у TrustedInstaller». Вы вправе редактировать",
-            "   или удалять ЛЮБЫЕ файлы и системные папки (включая C:\\YoroOS, C:\\Windows и System32),",
-            "   а при необходимости восстановить их одной кнопкой в Параметрах или командой sfc /restore.",
-            "",
-            "3. НАТИВНЫЙ ЗАПУСК .EXE, .ZIP И КАТАЛОГ ПРИЛОЖЕНИЙ:",
-            "   Поддерживается прямой запуск Windows PE (.exe), работа с архивами (.zip), загрузка",
-            "   браузеров Chrome, Firefox и Matronix 3.0.0, а также установка Steam, Python 3.12 и VS Code."
-        };
-        draw_text_title(r.x + 28, r.y + 64, "Условия лицензии и философия YoroOS", theme->text_main);
-        fill_round_rect(box, 7, theme->card_bg);
-        draw_round_rect(box, 7, RGBA(130, 145, 170, 75));
-        for (i = 0; i < 15 && box.y + 12 + i * 19 < box.y + box.h - 14; i++)
-            draw_text_small(box.x + 14, box.y + 12 + i * 19, lines[i],
-                            i == 0 ? theme->accent : theme->text_main);
-
-        ui_checkbox((Rect){r.x + 28, r.y + r.h - 94, 420, 26}, g_inst.license_ok,
-                    "Я принимаю условия и подтверждаю права полного владельца ПК", theme->text_main);
-        ui_button((Rect){r.x + 28, r.y + r.h - 52, 130, 38}, "<- Назад",
-                  pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 52, 130, 38}), 0);
-        ui_button((Rect){r.x + r.w - 220, r.y + r.h - 52, 192, 38}, "Далее ->",
-                  pt_in(mx, my, (Rect){r.x + r.w - 220, r.y + r.h - 52, 192, 38}), g_inst.license_ok);
-    }
-    else if (g_inst.step == STEP_DISKS) {
+    if (g_inst.step == INST_DISKS) {
         int nd = hal_disk_count();
-        Rect tbl = {r.x + 28, r.y + 116, r.w - 56, 210};
-        int ry = tbl.y + 36;
+        char hw[160];
+        icon_draw(ICON_SETUP, r.x + 28, r.y + 64, 40);
+        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.1", theme->text_main);
+        snprintf(hw, sizeof(hw), "%s  ·  %s  ·  ОЗУ %u МБ",
+                 hal_arch_name(), hal_pointer_driver_name(), (u32)hal_ram_mb());
+        draw_text_small(r.x + 80, r.y + 90, hw, theme->text_muted);
 
-        draw_text_title(r.x + 28, r.y + 62, "Куда вы хотите установить YoroOS 0.2?", theme->text_main);
-        draw_text_small(r.x + 28, r.y + 92,
-                        "Создайте и отформатируйте разделы GPT + UEFI System Partition (FAT16) + YoroFS2 (C:):",
-                        theme->text_muted);
-
-        fill_round_rect(tbl, 7, theme->card_bg);
-        draw_round_rect(tbl, 7, RGBA(130, 145, 170, 80));
-        fill_rect_alpha((Rect){tbl.x, tbl.y, tbl.w, 30}, RGBA(130, 145, 170, 30));
-        draw_text_small(tbl.x + 14, tbl.y + 7, "Диск / Раздел", theme->text_muted);
-        draw_text_small(tbl.x + 360, tbl.y + 7, "Общий размер", theme->text_muted);
-        draw_text_small(tbl.x + 500, tbl.y + 7, "Тип файловой системы", theme->text_muted);
-
-        if (nd == 0) {
-            draw_text(tbl.x + 18, ry + 24,
-                      "Физический/виртуальный диск VHDX не обнаружен — доступна установка в RAM-диск!",
-                      theme->text_main);
-        } else {
-            for (i = 0; i < nd && i < 3; i++) {
-                HalDiskInfo di;
-                char szb[32], line[96];
-                u64 mb;
-                hal_disk_info(i, &di);
-                mb = di.sectors / 2048ULL;
-                if (g_inst.part_formatted && g_inst.sel_disk == i) {
-                    /* Show all created GPT partitions just like Windows Setup! */
-                    Rect p1 = {tbl.x + 6, ry, tbl.w - 12, 34};
-                    Rect p2 = {tbl.x + 6, ry + 38, tbl.w - 12, 38};
-                    fill_round_rect_alpha(p1, 5, RGBA(16, 152, 92, 36));
-                    icon_draw(ICON_DRIVE, p1.x + 8, p1.y + 5, 24);
-                    snprintf(line, sizeof(line), "Диск %d Раздел 1: Системный раздел EFI", i);
-                    draw_text(p1.x + 38, p1.y + 8, line, theme->text_main);
-                    draw_text(p1.x + 378, p1.y + 8, "8.0 МБ", theme->text_main);
-                    draw_text_small(p1.x + 494, p1.y + 9, "FAT16 (UEFI BOOTX64)", RGB(72, 214, 142));
-
-                    fill_round_rect_alpha(p2, 5, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 68));
-                    draw_round_rect(p2, 5, theme->accent);
-                    icon_draw(ICON_DRIVE, p2.x + 8, p2.y + 7, 24);
-                    snprintf(line, sizeof(line), "Диск %d Раздел 2: YoroOS Primary (C:)", i);
-                    draw_text_bold(p2.x + 38, p2.y + 10, line, theme->text_main);
-                    snprintf(szb, sizeof(szb), "%u МБ", (u32)(mb > 16 ? mb - 16 : mb));
-                    draw_text(p2.x + 378, p2.y + 10, szb, theme->text_main);
-                    draw_text_small(p2.x + 494, p2.y + 11, "YoroFS2 (Основной)", theme->accent);
-                    ry += 82;
-                } else {
-                    Rect row = {tbl.x + 6, ry, tbl.w - 12, 40};
+        /* Disk Selection Section */
+        draw_text_bold(r.x + 28, r.y + 122, "Выберите целевой жёсткий диск (будет создана разметка GPT + UEFI FAT16 + YoroFS2):",
+                       theme->text_main);
+        {
+            Rect box = {r.x + 28, r.y + 148, r.w - 56, 134};
+            fill_round_rect(box, 8, theme->card_bg);
+            draw_round_rect(box, 8, RGBA(148, 163, 184, 65));
+            if (nd <= 0) {
+                draw_text(box.x + 18, box.y + 34, "Жёсткий диск (VHDX / NVMe / SATA) не подключён к виртуальной машине.",
+                          theme->text_main);
+                draw_text_small(box.x + 18, box.y + 62,
+                                "Создайте и подключите виртуальный диск .VHDX в настройках ВМ или нажмите «Live-режим».",
+                                theme->text_muted);
+            } else {
+                for (i = 0; i < nd && i < 2; i++) {
+                    HalDiskInfo di;
+                    Rect row = {box.x + 10, box.y + 10 + i * 58, box.w - 20, 52};
                     int sel = (g_inst.sel_disk == i);
-                    if (sel) {
-                        fill_round_rect_alpha(row, 5, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 58));
-                        draw_round_rect(row, 5, theme->accent);
-                    }
-                    icon_draw(ICON_DRIVE, row.x + 8, row.y + 8, 24);
-                    draw_text_clipped(row.x + 38, row.y + 11, 326, di.model, theme->text_main);
-                    snprintf(szb, sizeof(szb), "%u МБ", (u32)mb);
-                    draw_text(row.x + 378, row.y + 11, szb, theme->text_main);
-                    draw_text_small(row.x + 494, row.y + 12, "Незанятое пространство", theme->text_muted);
-                    ry += 44;
+                    char cap_s[96];
+                    u64 mb;
+                    hal_disk_info(i, &di);
+                    mb = (di.sectors * 512ULL) / (1024ULL * 1024ULL);
+                    fill_round_rect(row, 6, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 52)
+                                                : RGBA(148, 163, 184, 14));
+                    draw_round_rect(row, 6, sel ? theme->accent : RGBA(148, 163, 184, 42));
+                    icon_draw(ICON_DRIVE, row.x + 12, row.y + 10, 32);
+                    draw_text_bold(row.x + 54, row.y + 7, di.model, theme->text_main);
+                    snprintf(cap_s, sizeof(cap_s),
+                             "Ёмкость: %llu МБ  ·  Сектор: %u Б  ·  Схема: GPT + ESP 16 МБ (FAT16) + YoroFS2",
+                             (unsigned long long)mb, di.sector_bytes);
+                    draw_text_small(row.x + 54, row.y + 29, cap_s, theme->text_muted);
                 }
             }
         }
 
-        /* Partition Management Toolbar (Windows Setup style!) */
-        ui_button((Rect){r.x + 28,  r.y + 338, 192, 34}, "Создать разделы GPT",
-                  pt_in(mx, my, (Rect){r.x + 28,  r.y + 338, 192, 34}), 0);
-        ui_button((Rect){r.x + 228, r.y + 338, 150, 34}, "Форматировать",
-                  pt_in(mx, my, (Rect){r.x + 228, r.y + 338, 150, 34}), 0);
-        ui_button((Rect){r.x + 386, r.y + 338, 154, 34}, "Удалить разделы",
-                  pt_in(mx, my, (Rect){r.x + 386, r.y + 338, 154, 34}), 0);
-        ui_button((Rect){r.x + 548, r.y + 338, 145, 34}, "Обновить диски",
-                  pt_in(mx, my, (Rect){r.x + 548, r.y + 338, 145, 34}), 0);
-
-        if (g_inst.err_msg[0])
-            draw_text_small(r.x + 28, r.y + 382, g_inst.err_msg, RGB(245, 92, 92));
-        else
-            draw_text_small(r.x + 28, r.y + 382,
-                            "Автоматически создаются: GPT + Раздел EFI (BOOTX64.EFI для Hyper-V Gen 2) + том C: (YoroFS2).",
-                            theme->text_muted);
-
-        ui_button((Rect){r.x + 28, r.y + r.h - 52, 130, 38}, "<- Назад",
-                  pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 52, 130, 38}), 0);
-        ui_button((Rect){r.x + r.w - 250, r.y + r.h - 52, 222, 38}, "Установить на диск ->",
-                  pt_in(mx, my, (Rect){r.x + r.w - 250, r.y + r.h - 52, 222, 38}), 1);
-    }
-    else if (g_inst.step == STEP_INSTALL) {
-        static const char *stages[5] = {
-            "Создание таблицы разделов GPT и гибридного сектора MBR",
-            "Форматирование раздела UEFI Поколения 2 (FAT16, \\EFI\\BOOT\\BOOTX64.EFI)",
-            "Копирование ядра YoroKernel 0.2, драйвера Hyper-V VMBus и среды Win32",
-            "Развёртывание системных приложений, архиватора ZIP и браузера",
-            "Форматирование тома C: (YoroFS2) и проверка контрольной суммы CRC32"
-        };
-        static const int thresh[5] = { 18, 55, 78, 90, 100 };
-        char pctbuf[192];
-
-        draw_text_title(r.x + 28, r.y + 68, "Идёт установка YoroOS 0.2 «Aurora»...", theme->text_main);
-        draw_text_small(r.x + 28, r.y + 100,
-                        "Компьютер настраивается для загрузки с жёсткого диска без установочного ISO.",
-                        theme->text_muted);
-
-        for (i = 0; i < 5; i++) {
-            int sy = r.y + 138 + i * 38;
-            int done = g_inst.install_pct >= thresh[i];
-            if (done) icon_draw(ICON_CHECK, r.x + 34, sy, 22);
-            else fx_draw_spinner(r.x + 45, sy + 11, 8, sys_ticks(), theme->accent);
-            draw_text(r.x + 68, sy + 2, stages[i], done ? theme->text_main : theme->text_muted);
+        /* Edition Cards (2x2 compact clean grid) */
+        draw_text_bold(r.x + 28, r.y + 296, "Редакция системы:", theme->text_main);
+        {
+            static const char *kEdShort[4] = {
+                "Базовая рабочая ОС, .EXE и .ZIP",
+                "Python 3.12, VS Code и Git",
+                "Steam, Discord и Matronix Browser",
+                "Лёгкая минималистичная сборка"
+            };
+            int cw = (r.w - 68) / 2;
+            for (i = 0; i < 4; i++) {
+                Rect c = {r.x + 28 + (i % 2) * (cw + 12), r.y + 322 + (i / 2) * 64, cw, 56};
+                int sel = (g_inst.edition == i);
+                fill_round_rect(c, 8, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 48)
+                                          : theme->card_bg);
+                draw_round_rect(c, 8, sel ? theme->accent : RGBA(148, 163, 184, 52));
+                draw_text_bold(c.x + 14, c.y + 8, edition_name(i), theme->text_main);
+                draw_text_small(c.x + 14, c.y + 31, kEdShort[i], theme->text_muted);
+            }
         }
 
-        snprintf(pctbuf, sizeof(pctbuf), "Выполнено: %d%%  —  %s", g_inst.install_pct, g_inst.install_msg);
-        draw_text_bold(r.x + 28, r.y + 348, pctbuf, theme->accent);
-        ui_progress((Rect){r.x + 28, r.y + 378, r.w - 56, 16}, g_inst.install_pct, theme->accent);
+        ui_button((Rect){r.x + 28, r.y + r.h - 50, 190, 36},
+                  kbd_is_ru() ? "Язык ввода: RU" : "Input: EN",
+                  pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 50, 190, 36}), 0);
+        if (system_screen_mode == SCREEN_SETUP) {
+            ui_button((Rect){r.x + 230, r.y + r.h - 50, 230, 36},
+                      "Live-режим (без записи)",
+                      pt_in(mx, my, (Rect){r.x + 230, r.y + r.h - 50, 230, 36}), 0);
+        }
+        ui_button((Rect){r.x + r.w - 228, r.y + r.h - 50, 200, 36},
+                  "Далее: Профиль ->",
+                  pt_in(mx, my, (Rect){r.x + r.w - 228, r.y + r.h - 50, 200, 36}), 1);
     }
-    else if (g_inst.step == STEP_OOBE) {
-        draw_text_title(r.x + 28, r.y + 62, "Персонализация вашего компьютера (OOBE)", theme->text_main);
+    else if (g_inst.step == INST_PROFILE) {
+        Rect f_user = {r.x + 28, r.y + 132, 340, 36};
+        Rect f_pc   = {r.x + 28, r.y + 206, 340, 36};
+        Rect wp_box = {r.x + 404, r.y + 114, r.w - 432, 196};
+        char winfo[96];
+
+        draw_text_title(r.x + 28, r.y + 64, "Настройка учётной записи и внешнего вида", theme->text_main);
         draw_text_small(r.x + 28, r.y + 92,
-                        "Файлы системы записаны на диск! Укажите имя владельца, тему и обои Рабочего стола:",
+                        "Параметры будут сразу сохранены на загрузочный том YoroFS2:",
                         theme->text_muted);
 
-        draw_text(r.x + 28, r.y + 126, "Имя пользователя:", theme->text_main);
-        ui_textfield((Rect){r.x + 28, r.y + 150, 340, 36}, sys_profile.username,
-                     g_inst.user_caret, g_inst.focus_field == 0, "User");
+        draw_text_small(r.x + 28, r.y + 112, "Имя пользователя:", theme->text_main);
+        ui_textfield(f_user, sys_profile.username, g_inst.user_caret, g_inst.focus_field == 0, "User");
 
-        draw_text(r.x + 394, r.y + 126, "Имя компьютера:", theme->text_main);
-        ui_textfield((Rect){r.x + 394, r.y + 150, 340, 36}, sys_profile.pc_name,
-                     g_inst.pc_caret, g_inst.focus_field == 1, "YORO-PC");
+        draw_text_small(r.x + 28, r.y + 186, "Имя компьютера:", theme->text_main);
+        ui_textfield(f_pc, sys_profile.pc_name, g_inst.pc_caret, g_inst.focus_field == 1, "YORO-PC");
 
-        draw_text(r.x + 28, r.y + 204, "Цветовое оформление системы:", theme->text_main);
-        for (i = 0; i < 6; i++) {
-            Theme *t = theme_get(i);
-            Rect sw = {r.x + 28 + i * 124, r.y + 230, 116, 44};
-            fill_round_rect(sw, 7, t->win_bg);
-            draw_round_rect(sw, 7, theme_current() == i ? t->accent : RGBA(130, 145, 170, 80));
-            fill_circle(sw.x + 18, sw.y + 22, 8, t->accent);
-            draw_text_small(sw.x + 32, sw.y + 14, t->dark ? "Тёмная" : "Светлая", t->text_main);
-        }
+        ui_button((Rect){r.x + 28, r.y + 264, 164, 36},
+                  theme->dark ? "Тема: Тёмная" : "Тема: Светлая",
+                  pt_in(mx, my, (Rect){r.x + 28, r.y + 264, 164, 36}), 0);
+        ui_button((Rect){r.x + 204, r.y + 264, 164, 36},
+                  "Сменить обои",
+                  pt_in(mx, my, (Rect){r.x + 204, r.y + 264, 164, 36}), 0);
 
-        draw_text(r.x + 28, r.y + 290, "Обои Рабочего стола HD:", theme->text_main);
-        for (i = 0; i < 4; i++) {
-            Rect wb = {r.x + 28 + i * 188, r.y + 316, 178, 42};
-            ui_button(wb, wallpaper_name(i), pt_in(mx, my, wb), wallpaper_current() == i);
-        }
+        fill_round_rect(wp_box, 10, theme->card_bg);
+        draw_round_rect(wp_box, 10, RGBA(148, 163, 184, 70));
+        icon_draw(ICON_ABOUT, wp_box.x + (wp_box.w - 48) / 2, wp_box.y + 28, 48);
+        snprintf(winfo, sizeof(winfo), "Обои: %s", wallpaper_name(wallpaper_current()));
+        draw_text_center(wp_box.x + wp_box.w / 2, wp_box.y + 94, winfo, theme->text_main);
+        draw_text_center_face(FACE_SMALL, wp_box.x + wp_box.w / 2, wp_box.y + 122,
+                              "После установки система будет загружаться", theme->text_muted);
+        draw_text_center_face(FACE_SMALL, wp_box.x + wp_box.w / 2, wp_box.y + 142,
+                              "прямо с виртуального жёсткого диска", theme->text_muted);
 
-        ui_button((Rect){r.x + r.w - 270, r.y + r.h - 52, 242, 38},
-                  "Сохранить и продолжить ->",
-                  pt_in(mx, my, (Rect){r.x + r.w - 270, r.y + r.h - 52, 242, 38}), 1);
+        ui_button((Rect){r.x + 28, r.y + r.h - 50, 140, 36}, "<- Назад",
+                  pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 50, 140, 36}), 0);
+        ui_button((Rect){r.x + r.w - 268, r.y + r.h - 50, 240, 36},
+                  "Начать установку на диск",
+                  pt_in(mx, my, (Rect){r.x + r.w - 268, r.y + r.h - 50, 240, 36}), 1);
     }
-    else {
-        icon_draw(ICON_CHECK, r.x + 30, r.y + 72, 44);
-        draw_text_title(r.x + 86, r.y + 70, "YoroOS 0.2 «Aurora» готова к работе!", theme->text_main);
-        draw_text(r.x + 86, r.y + 106,
-                  "Система установлена в режиме GPT + UEFI Поколение 2 (BOOTX64.EFI) + YoroFS2.",
-                  theme->text_muted);
+    else if (g_inst.step == INST_WRITE) {
+        static const char *kPhaseLabels[6] = {
+            "Запись гибридной таблицы разделов GPT (Primary + Backup CRC32)",
+            "Форматирование раздела EFI (FAT16, 16 МБ) и запись BOOTX64.EFI",
+            "Запись загрузчика BIOS Stage2 и ядра YoroKernel",
+            "Создание корневой файловой системы YoroFS2 и перенос приложений",
+            "Регистрация загрузочной записи YoroOS в UEFI NVRAM (Boot0001)",
+            "Физическое контрольное чтение и проверка контрольных сумм CRC32"
+        };
+        Rect pbar = {r.x + 36, r.y + 148, r.w - 72, 22};
+        char pct_s[64];
 
-        ui_card((Rect){r.x + 28, r.y + 148, r.w - 56, 168}, 0, 8);
-        draw_text_bold(r.x + 48, r.y + 166, "Что уже готово для вас на Рабочем столе:", theme->accent);
-        draw_text_small(r.x + 48, r.y + 194, "• Проводник YoroFS с правом удалять любые папки (даже C:\\YoroOS и System32!)", theme->text_main);
-        draw_text_small(r.x + 48, r.y + 216, "• Нативный запуск Windows .EXE файлов и архиватор .ZIP (чтение, распаковка, сжатие)", theme->text_main);
-        draw_text_small(r.x + 48, r.y + 238, "• Браузер с загрузкой Google Chrome, Mozilla Firefox и Matronix Browser 3.0.0", theme->text_main);
-        draw_text_small(r.x + 48, r.y + 260, "• Центр установки приложений с иконками: Steam, Python 3.12, VS Code, Discord, VLC, Git", theme->text_main);
-        draw_text_small(r.x + 48, r.y + 282, "• Можете извлечь установочный .ISO и перезагрузить ВМ — система загрузится с диска!", RGB(72, 214, 142));
+        draw_text_title(r.x + 36, r.y + 68,
+                        g_inst.task.failed ? "Ошибка установки на диск" : "Идёт установка YoroOS на жёсткий диск...",
+                        theme->text_main);
+        draw_text(r.x + 36, r.y + 102, g_inst.task.failed ? g_inst.task.err : g_inst.task.status,
+                  g_inst.task.failed ? RGB(239, 68, 68) : theme->text_main);
+        draw_text_small(r.x + 36, r.y + 124, g_inst.task.detail, theme->text_muted);
 
-        ui_button((Rect){r.x + 28, r.y + r.h - 52, 250, 38}, "Перезагрузить с диска",
-                  pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 52, 250, 38}), 0);
-        ui_button((Rect){r.x + r.w - 312, r.y + r.h - 52, 284, 38}, "Открыть Рабочий стол YoroOS ->",
-                  pt_in(mx, my, (Rect){r.x + r.w - 312, r.y + r.h - 52, 284, 38}), 1);
+        ui_progress(pbar, g_inst.task.pct, g_inst.task.failed ? RGB(239, 68, 68) : theme->accent);
+        snprintf(pct_s, sizeof(pct_s), "Выполнено: %d%%  ·  Записано на носитель: %u.%u МБ",
+                 g_inst.task.pct,
+                 (u32)(g_inst.task.bytes_written / (1024ULL * 1024ULL)),
+                 (u32)(((g_inst.task.bytes_written % (1024ULL * 1024ULL)) * 10ULL) / (1024ULL * 1024ULL)));
+        draw_text_small(r.x + 36, r.y + 178, pct_s, theme->text_muted);
+
+        /* Real-time 6-stage hardware checklist */
+        for (i = 0; i < 6; i++) {
+            int pnum = i + 1;
+            int done = g_inst.task.done || (g_inst.task.phase > pnum);
+            int cur  = (!g_inst.task.done && !g_inst.task.failed && g_inst.task.phase == pnum);
+            int yy = r.y + 214 + i * 36;
+            Rect badge = {r.x + 36, yy, 24, 24};
+            fill_round_rect(badge, 12, done ? RGB(16, 185, 129)
+                                            : (cur ? theme->accent : RGBA(148, 163, 184, 38)));
+            draw_text_center_face(FACE_SMALL, badge.x + 12, badge.y + 4,
+                                  done ? "+" : (cur ? ">" : "."), C_WHITE);
+            draw_text(r.x + 72, yy + 3, kPhaseLabels[i],
+                      (done || cur) ? theme->text_main : theme->text_muted);
+        }
+
+        if (g_inst.task.failed) {
+            ui_button((Rect){r.x + 36, r.y + r.h - 50, 160, 36}, "<- Назад",
+                      pt_in(mx, my, (Rect){r.x + 36, r.y + r.h - 50, 160, 36}), 0);
+        }
+    }
+    else { /* INST_DONE */
+        u32 elapsed = sys_ticks() - g_inst.finish_tick;
+        int rem_sec = 6 - (int)(elapsed / 100U);
+        char rb_msg[128];
+        if (rem_sec < 0) rem_sec = 0;
+
+        icon_draw(ICON_CHECK, r.x + r.w / 2 - 28, r.y + 74, 56);
+        draw_text_center_face(FACE_TITLE, r.x + r.w / 2, r.y + 142,
+                              "YoroOS 0.2.1 успешно установлена на жёсткий диск!", theme->text_main);
+        draw_text_center(r.x + r.w / 2, r.y + 178, g_inst.task.detail, theme->text_muted);
+        draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 208,
+                              "Загрузчик YoroBoot и раздел EFI FAT16 записаны и проверены посекторным чтением.",
+                              theme->text_muted);
+        draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 228,
+                              "Система загрузится с жёсткого диска автоматически (даже если не извлекать ISO).",
+                              theme->text_muted);
+
+        if (g_inst.auto_reboot_on) {
+            snprintf(rb_msg, sizeof(rb_msg), "Автоматическая перезагрузка в установленную систему через %d с...", rem_sec);
+            ui_progress((Rect){r.x + 160, r.y + 272, r.w - 320, 14}, (int)((elapsed * 100U) / 600U), theme->accent);
+            draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 296, rb_msg, theme->accent);
+        }
+
+        ui_button((Rect){r.x + 60, r.y + r.h - 56, 220, 40},
+                  "Открыть Рабочий стол",
+                  pt_in(mx, my, (Rect){r.x + 60, r.y + r.h - 56, 220, 40}), 0);
+        if (g_inst.auto_reboot_on) {
+            ui_button((Rect){r.x + 294, r.y + r.h - 56, 200, 40},
+                      "Остановить таймер",
+                      pt_in(mx, my, (Rect){r.x + 294, r.y + r.h - 56, 200, 40}), 0);
+        }
+        ui_button((Rect){r.x + r.w - 280, r.y + r.h - 56, 220, 40},
+                  "Перезагрузить сейчас",
+                  pt_in(mx, my, (Rect){r.x + r.w - 280, r.y + r.h - 56, 220, 40}), 1);
     }
 }
 
 static void handle_wizard_event(Rect r, YoroEvent *e) {
     int i;
-    if (e->type == EV_KEY && e->shift && e->key == KEY_F10) {
-        /* Classic Windows Setup Shift+F10 shortcut -> jump to Desktop + Terminal! */
+    if (e->type == EV_KEY && e->key == KEY_F10 && e->shift) {
         system_screen_mode = SCREEN_DESKTOP;
         terminal_open();
+        wm_invalidate();
         return;
     }
 
-    if (e->type == EV_KEY) {
-        if (g_inst.step == STEP_WELCOME) {
-            if (e->key == KEY_UP && g_inst.edition > 0) { g_inst.edition--; wm_invalidate(); return; }
-            if (e->key == KEY_DOWN && g_inst.edition < 3) { g_inst.edition++; wm_invalidate(); return; }
-            if (e->key == KEY_ESC && system_screen_mode == SCREEN_SETUP) {
+    if (g_inst.step == INST_DISKS) {
+        if (e->type == EV_KEY && e->key == KEY_ENTER) {
+            g_inst.step = INST_PROFILE;
+            wm_invalidate();
+            return;
+        }
+        if (e->type == EV_MOUSE_DOWN && e->btn == 1) {
+            int nd = hal_disk_count();
+            int cw = (r.w - 68) / 2;
+            for (i = 0; i < nd && i < 2; i++) {
+                Rect row = {r.x + 38, r.y + 158 + i * 58, r.w - 76, 52};
+                if (pt_in(e->x, e->y, row)) { g_inst.sel_disk = i; wm_invalidate(); return; }
+            }
+            for (i = 0; i < 4; i++) {
+                Rect c = {r.x + 28 + (i % 2) * (cw + 12), r.y + 322 + (i / 2) * 64, cw, 56};
+                if (pt_in(e->x, e->y, c)) { g_inst.edition = i; wm_invalidate(); return; }
+            }
+            if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 50, 190, 36})) {
+                kbd_toggle_layout(); return;
+            }
+            if (system_screen_mode == SCREEN_SETUP &&
+                pt_in(e->x, e->y, (Rect){r.x + 230, r.y + r.h - 50, 230, 36})) {
                 system_screen_mode = SCREEN_DESKTOP;
                 desktop_rebuild();
                 wm_invalidate();
+                toast("Запущен Live-режим YoroOS. Установщик доступен с Рабочего стола.");
                 return;
             }
-            if (e->key == KEY_ENTER) { g_inst.step = STEP_LICENSE; wm_invalidate(); return; }
-        }
-        else if (g_inst.step == STEP_LICENSE) {
-            if (e->ch == ' ') { g_inst.license_ok = !g_inst.license_ok; wm_invalidate(); return; }
-            if (e->key == KEY_ESC) { g_inst.step = STEP_WELCOME; wm_invalidate(); return; }
-            if (e->key == KEY_ENTER) {
-                g_inst.license_ok = 1;
-                hal_disk_rescan();
-                g_inst.step = STEP_DISKS;
+            if (pt_in(e->x, e->y, (Rect){r.x + r.w - 228, r.y + r.h - 50, 200, 36})) {
+                g_inst.step = INST_PROFILE;
                 wm_invalidate();
                 return;
             }
         }
-        else if (g_inst.step == STEP_DISKS) {
-            int nd = hal_disk_count();
-            if (e->key == KEY_UP && g_inst.sel_disk > 0) { g_inst.sel_disk--; wm_invalidate(); return; }
-            if (e->key == KEY_DOWN && g_inst.sel_disk + 1 < nd) { g_inst.sel_disk++; wm_invalidate(); return; }
-            if (e->key == KEY_ESC) { g_inst.step = STEP_LICENSE; wm_invalidate(); return; }
-            if (e->key == KEY_ENTER && nd > 0) {
-                g_inst.part_formatted = 1;
-                g_inst.install_started = 0;
-                g_inst.install_pct = 2;
-                strcpy(g_inst.install_msg, "Инициализация установщика...");
-                g_inst.step = STEP_INSTALL;
-                wm_invalidate();
-                return;
-            }
-        }
-        else if (g_inst.step == STEP_OOBE) {
+    }
+    else if (g_inst.step == INST_PROFILE) {
+        if (e->type == EV_KEY) {
             if (e->key == KEY_TAB) { g_inst.focus_field = !g_inst.focus_field; wm_invalidate(); return; }
-            if (e->key == KEY_ENTER) {
-                if (!sys_profile.username[0]) strcpy(sys_profile.username, "User");
-                if (sys_profile.installed_disk_idx >= 0)
-                    disk_save_yorofs(sys_profile.installed_disk_idx);
-                desktop_rebuild();
-                g_inst.step = STEP_FINISH;
-                wm_invalidate();
-                return;
-            }
+            if (e->key == KEY_ENTER) { start_async_install(); return; }
             if (g_inst.focus_field == 0)
                 ui_textfield_edit(sys_profile.username, sizeof(sys_profile.username), &g_inst.user_len, &g_inst.user_caret, e);
             else
@@ -427,151 +380,74 @@ static void handle_wizard_event(Rect r, YoroEvent *e) {
             wm_invalidate();
             return;
         }
-        else if (g_inst.step == STEP_FINISH) {
-            if (e->key == KEY_ENTER) {
-                if (g_inst.win) {
-                    Window *w = g_inst.win;
-                    g_inst.win = NULL;
-                    wm_close(w);
-                }
+        if (e->type == EV_MOUSE_DOWN && e->btn == 1) {
+            if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + 132, 340, 36})) { g_inst.focus_field = 0; wm_invalidate(); return; }
+            if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + 206, 340, 36})) { g_inst.focus_field = 1; wm_invalidate(); return; }
+            if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + 264, 164, 36})) { theme_set(theme->dark ? 1 : 0); return; }
+            if (pt_in(e->x, e->y, (Rect){r.x + 204, r.y + 264, 164, 36})) { wallpaper_set(wallpaper_current() + 1); return; }
+            if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 50, 140, 36})) { g_inst.step = INST_DISKS; wm_invalidate(); return; }
+            if (pt_in(e->x, e->y, (Rect){r.x + r.w - 268, r.y + r.h - 50, 240, 36})) { start_async_install(); return; }
+        }
+    }
+    else if (g_inst.step == INST_WRITE) {
+        if (g_inst.task.failed && e->type == EV_MOUSE_DOWN && e->btn == 1 &&
+            pt_in(e->x, e->y, (Rect){r.x + 36, r.y + r.h - 50, 160, 36})) {
+            g_inst.step = INST_DISKS;
+            wm_invalidate();
+        }
+    }
+    else if (g_inst.step == INST_DONE) {
+        if (e->type == EV_KEY && e->key == KEY_ENTER) {
+            system_reboot();
+            return;
+        }
+        if (e->type == EV_MOUSE_DOWN && e->btn == 1) {
+            if (pt_in(e->x, e->y, (Rect){r.x + 60, r.y + r.h - 56, 220, 40})) {
+                g_inst.auto_reboot_on = 0;
                 system_screen_mode = SCREEN_DESKTOP;
+                if (g_inst.win) { Window *w = g_inst.win; g_inst.win = NULL; wm_close(w); }
                 desktop_rebuild();
                 wm_invalidate();
+                toast("Добро пожаловать в установленную YoroOS 0.2.1!");
+                return;
+            }
+            if (g_inst.auto_reboot_on && pt_in(e->x, e->y, (Rect){r.x + 294, r.y + r.h - 56, 200, 40})) {
+                g_inst.auto_reboot_on = 0;
+                wm_invalidate();
+                return;
+            }
+            if (pt_in(e->x, e->y, (Rect){r.x + r.w - 280, r.y + r.h - 56, 220, 40})) {
+                system_reboot();
                 return;
             }
         }
     }
-
-    if (e->type != EV_MOUSE_DOWN || e->btn != 1) return;
-
-    if (g_inst.step == STEP_WELCOME) {
-        for (i = 0; i < 4; i++) {
-            Rect card = {r.x + 28, r.y + 152 + i * 58, r.w - 56, 52};
-            if (pt_in(e->x, e->y, card)) { g_inst.edition = i; wm_invalidate(); return; }
-        }
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 52, 230, 38})) { kbd_toggle_layout(); return; }
-        if (system_screen_mode == SCREEN_SETUP &&
-            pt_in(e->x, e->y, (Rect){r.x + 270, r.y + r.h - 52, 270, 38})) {
-            system_screen_mode = SCREEN_DESKTOP;
-            desktop_rebuild();
-            wm_invalidate();
-            return;
-        }
-        if (pt_in(e->x, e->y, (Rect){r.x + r.w - 246, r.y + r.h - 52, 218, 38})) {
-            g_inst.step = STEP_LICENSE;
-            wm_invalidate();
-        }
-    }
-    else if (g_inst.step == STEP_LICENSE) {
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 94, 460, 28}))
-            g_inst.license_ok = !g_inst.license_ok;
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 52, 130, 38}))
-            g_inst.step = STEP_WELCOME;
-        if (g_inst.license_ok && pt_in(e->x, e->y, (Rect){r.x + r.w - 220, r.y + r.h - 52, 192, 38})) {
-            hal_disk_rescan();
-            g_inst.step = STEP_DISKS;
-        }
-        wm_invalidate();
-    }
-    else if (g_inst.step == STEP_DISKS) {
-        int nd = hal_disk_count();
-        for (i = 0; i < nd && i < 3; i++) {
-            Rect row = {r.x + 34, r.y + 152 + i * 44, r.w - 68, 42};
-            if (pt_in(e->x, e->y, row)) g_inst.sel_disk = i;
-        }
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + 338, 192, 34}) ||
-            pt_in(e->x, e->y, (Rect){r.x + 228, r.y + 338, 150, 34})) {
-            g_inst.part_formatted = 1;
-            toast("Разделы GPT (EFI 8 МБ FAT16 + Основной YoroFS2) подготовлены к установке.");
-        }
-        if (pt_in(e->x, e->y, (Rect){r.x + 386, r.y + 338, 154, 34}))
-            g_inst.part_formatted = 0;
-        if (pt_in(e->x, e->y, (Rect){r.x + 548, r.y + 338, 145, 34}))
-            hal_disk_rescan();
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 52, 130, 38}))
-            g_inst.step = STEP_LICENSE;
-        if (pt_in(e->x, e->y, (Rect){r.x + r.w - 250, r.y + r.h - 52, 222, 38})) {
-            g_inst.part_formatted = 1;
-            g_inst.install_started = 0;
-            g_inst.install_pct = 2;
-            strcpy(g_inst.install_msg, "Инициализация установщика...");
-            g_inst.step = STEP_INSTALL;
-        }
-        wm_invalidate();
-    }
-    else if (g_inst.step == STEP_OOBE) {
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + 150, 340, 36})) g_inst.focus_field = 0;
-        if (pt_in(e->x, e->y, (Rect){r.x + 394, r.y + 150, 340, 36})) g_inst.focus_field = 1;
-        for (i = 0; i < 6; i++) {
-            Rect sw = {r.x + 28 + i * 124, r.y + 230, 116, 44};
-            if (pt_in(e->x, e->y, sw)) theme_set(i);
-        }
-        for (i = 0; i < 4; i++) {
-            Rect wb = {r.x + 28 + i * 188, r.y + 316, 178, 42};
-            if (pt_in(e->x, e->y, wb)) wallpaper_set(i);
-        }
-        if (pt_in(e->x, e->y, (Rect){r.x + r.w - 270, r.y + r.h - 52, 242, 38})) {
-            if (!sys_profile.username[0]) strcpy(sys_profile.username, "User");
-            if (sys_profile.installed_disk_idx >= 0)
-                disk_save_yorofs(sys_profile.installed_disk_idx);
-            desktop_rebuild();
-            g_inst.step = STEP_FINISH;
-        }
-        wm_invalidate();
-    }
-    else if (g_inst.step == STEP_FINISH) {
-        if (pt_in(e->x, e->y, (Rect){r.x + 28, r.y + r.h - 52, 250, 38})) {
-            system_reboot();
-            return;
-        }
-        if (pt_in(e->x, e->y, (Rect){r.x + r.w - 312, r.y + r.h - 52, 284, 38})) {
-            if (g_inst.win) {
-                Window *w = g_inst.win;
-                g_inst.win = NULL;
-                wm_close(w);
-            }
-            system_screen_mode = SCREEN_DESKTOP;
-            desktop_rebuild();
-            wm_invalidate();
-        }
-    }
 }
 
-/* Boot-time Windows Setup environment */
 void installer_draw_fullscreen(void) {
     Rect dlg = boot_dialog_rect();
-    Rect win_frame = {dlg.x, dlg.y - 34, dlg.w, dlg.h + 34};
+    Rect frame = {dlg.x, dlg.y - 34, dlg.w, dlg.h + 34};
 
     theme_draw_wallpaper();
-    fill_rect_alpha((Rect){0, 0, (int)fb.width, (int)fb.height}, RGBA(6, 18, 44, 132));
-
-    /* Real Windows Setup Frame + Titlebar */
-    draw_shadow(win_frame, 12);
-    fill_round_rect(win_frame, 8, theme->win_head);
-    icon_draw(ICON_SETUP, win_frame.x + 12, win_frame.y + 7, 20);
-    draw_text_bold(win_frame.x + 40, win_frame.y + 8,
-                   "Программа установки YoroOS 0.2 «Aurora» (UEFI Gen 2 & BIOS)", theme->text_main);
+    draw_shadow(frame, 16);
+    fill_round_rect(frame, 10, theme->win_head);
+    icon_draw(ICON_SETUP, frame.x + 12, frame.y + 7, 20);
+    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.1 — Мастер установки системы", theme->text_main);
     draw_wizard_body(dlg);
-    draw_round_rect(win_frame, 8, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 175));
-
-    /* Helpful subtle status bar along bottom edge */
-    draw_text_center_face(FACE_SMALL, (int)fb.width / 2, (int)fb.height - 22,
-        "Подсказка: мышь работает нативно (Hyper-V VMBus / USB HID / F8 стрелки) · Shift+F10 открывает Терминал",
-        RGBA(225, 238, 255, 220));
+    draw_round_rect(frame, 10, RGBA(148, 163, 184, 75));
 }
 
 void installer_event_fullscreen(YoroEvent *e) {
     handle_wizard_event(boot_dialog_rect(), e);
 }
 
-/* Desktop Window mode */
-static void inst_win_draw(Window *w, Rect r) { UNUSED(w); draw_wizard_body(r); }
-static void inst_win_event(Window *w, YoroEvent *e) { handle_wizard_event(wm_client(w), e); }
-static void inst_win_close(Window *w) { if (g_inst.win == w) g_inst.win = NULL; }
+static void win_inst_draw(Window *w, Rect r) { UNUSED(w); draw_wizard_body(r); }
+static void win_inst_ev(Window *w, YoroEvent *e) { handle_wizard_event(wm_client(w), e); }
+static void win_inst_close(Window *w) { UNUSED(w); disk_install_free(&g_inst.task); g_inst.win = NULL; }
 
 void installer_open(void) {
     if (g_inst.win) { wm_focus(g_inst.win); return; }
     installer_init_boot();
-    g_inst.win = wm_open(app_find("installer"), "Установка YoroOS 0.2 на диск",
-                         -1, -1, 820, 560, inst_win_draw, inst_win_event, inst_win_close);
+    g_inst.win = wm_open(app_find("installer"), "Установка YoroOS на диск",
+                         -1, -1, 820, 560, win_inst_draw, win_inst_ev, win_inst_close);
 }

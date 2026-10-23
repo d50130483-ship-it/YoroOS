@@ -27,18 +27,18 @@ CXXFLAGS32 := -m32 -std=c++17 -O2 -ffreestanding -fno-exceptions -fno-rtti -fno-
               -mno-sse -mno-mmx -mno-80387 $(COMMON_WARN)
 LDFLAGS32  := -m elf_i386 -T boot/kernel.ld --build-id=none -nostdlib --no-warn-rwx-segments -z noexecstack
 
-CORE_C := string heap font font_data gfx theme icons inflate pe fs diskfmt ui wm \
+CORE_C := string heap font font_data assets_data gfx theme icons inflate pe fs diskfmt ui wm \
           apps main desktop app_installer app_explorer app_zip app_terminal \
           app_settings app_browser app_store app_misc
 
 U64_OBJS := $(patsubst %,build/u64/%.obj,$(CORE_C)) \
-            build/u64/fx.obj build/u64/hv_mouse.obj build/u64/hal_uefi64.obj build/u64/pe_asm.obj
+            build/u64/fx.obj build/u64/hv_mouse.obj build/u64/hv_native.obj build/u64/hal_uefi64.obj build/u64/pe_asm.obj
 
 B32_OBJS := $(patsubst %,build/b32/%.o,$(CORE_C)) \
-            build/b32/fx.o build/b32/ata.o build/b32/hal_bios32.o \
+            build/b32/fx.o build/b32/hv_native.o build/b32/ata.o build/b32/hal_bios32.o \
             build/b32/entry.o build/b32/isr.o build/b32/pe_asm.o
 
-ISO_OUT  := release/YoroOS-0.2.0.iso
+ISO_OUT  := release/YoroOS-0.2.1.iso
 
 .PHONY: all clean seeds iso
 

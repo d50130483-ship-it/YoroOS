@@ -4,30 +4,30 @@
 extern const u8 *fs_builtin_pkg_bytes(const char *id, int *out_len, const char **out_filename);
 
 static App g_apps[] = {
-    /* Core 5 System Applications + Essential Windows Tools (pre-installed) */
-    { "explorer",  "Проводник",          ICON_FOLDER,   1, 1, 1, 0, 820, 520, explorer_open },
-    { "browser",   "Браузер YoroWeb",    ICON_BROWSER,  1, 1, 1, 1, 860, 540, browser_open },
-    { "store",     "Центр приложений",   ICON_STORE,    1, 1, 1, 1, 840, 530, store_open },
-    { "terminal",  "Терминал YoroOS",    ICON_TERMINAL, 1, 1, 1, 1, 760, 470, terminal_open },
-    { "settings",  "Параметры YoroOS",   ICON_SETTINGS, 1, 1, 1, 1, 820, 520, settings_open },
-    { "installer", "Установка YoroOS",   ICON_SETUP,    1, 1, 1, 1, 820, 540, installer_open },
-    { "notepad",   "Блокнот",            ICON_NOTEPAD,  1, 1, 1, 0, 680, 450, notepad_open },
-    { "calc",      "Калькулятор",        ICON_CALC,     1, 1, 1, 0, 340, 450, calc_open },
-    { "paint",     "Графический Paint",  ICON_PAINT,    1, 1, 1, 0, 740, 490, paint_open },
-    { "taskmgr",   "Диспетчер задач",    ICON_TASKMGR,  1, 1, 1, 0, 680, 450, taskmgr_open },
-    { "regedit",   "Редактор реестра",   ICON_REGEDIT,  1, 1, 0, 0, 720, 450, regedit_open },
-    { "about",     "О системе YoroOS",   ICON_ABOUT,    1, 1, 0, 0, 540, 390, about_open },
+    /* Core System Applications (clean short names — zero truncation on desktop/tiles!) */
+    { "explorer",  "Файлы",        ICON_COMPUTER, 1, 1, 1, 0, 820, 520, explorer_open },
+    { "browser",   "Браузер",      ICON_BROWSER,  1, 1, 1, 1, 860, 540, browser_open },
+    { "store",     "Приложения",   ICON_STORE,    1, 1, 1, 1, 840, 530, store_open },
+    { "terminal",  "Терминал",     ICON_TERMINAL, 1, 1, 1, 1, 760, 470, terminal_open },
+    { "settings",  "Настройки",    ICON_SETTINGS, 1, 1, 1, 1, 820, 520, settings_open },
+    { "installer", "Установщик",   ICON_SETUP,    1, 1, 1, 1, 820, 540, installer_open },
+    { "notepad",   "Заметки",      ICON_NOTEPAD,  1, 1, 1, 0, 680, 450, notepad_open },
+    { "calc",      "Калькулятор",  ICON_CALC,     1, 1, 1, 0, 340, 450, calc_open },
+    { "paint",     "Рисование",    ICON_PAINT,    1, 1, 1, 0, 740, 490, paint_open },
+    { "taskmgr",   "Процессы",     ICON_TASKMGR,  1, 1, 1, 0, 680, 450, taskmgr_open },
+    { "regedit",   "Конфигурация", ICON_REGEDIT,  1, 1, 0, 0, 720, 450, regedit_open },
+    { "about",     "О системе",    ICON_ABOUT,    1, 1, 0, 0, 540, 390, about_open },
 
-    /* Installable Store / Browser Applications (with full icons, Desktop shortcuts & real environments!) */
-    { "matronix",  "Matronix Browser",   ICON_MATRONIX, 0, 0, 1, 1, 860, 540, matronix_open },
-    { "chrome",    "Google Chrome",      ICON_CHROME,   0, 0, 1, 1, 860, 540, chrome_open },
-    { "firefox",   "Mozilla Firefox",    ICON_FIREFOX,  0, 0, 1, 1, 860, 540, firefox_open },
-    { "steam",     "Steam",              ICON_STEAM,    0, 0, 1, 1, 840, 520, steam_open },
-    { "python",    "Python 3.12 IDE",    ICON_PYTHON,   0, 0, 1, 1, 780, 500, python_app_open },
-    { "vscode",    "Visual Studio Code", ICON_VSCODE,   0, 0, 1, 1, 860, 540, vscode_open },
-    { "discord",   "Discord",            ICON_DISCORD,  0, 0, 1, 1, 800, 500, discord_open },
-    { "vlc",       "VLC Media Player",   ICON_VLC,      0, 0, 1, 1, 660, 440, vlc_open },
-    { "git",       "Git Bash",           ICON_GIT,      0, 0, 1, 1, 740, 460, git_app_open },
+    /* Installable Catalog Applications */
+    { "matronix",  "Matronix",     ICON_MATRONIX, 0, 0, 1, 1, 860, 540, matronix_open },
+    { "chrome",    "Chrome",       ICON_CHROME,   0, 0, 1, 1, 860, 540, chrome_open },
+    { "firefox",   "Firefox",      ICON_FIREFOX,  0, 0, 1, 1, 860, 540, firefox_open },
+    { "steam",     "Steam",        ICON_STEAM,    0, 0, 1, 1, 840, 520, steam_open },
+    { "python",    "Python 3.12",  ICON_PYTHON,   0, 0, 1, 1, 780, 500, python_app_open },
+    { "vscode",    "VS Code",      ICON_VSCODE,   0, 0, 1, 1, 860, 540, vscode_open },
+    { "discord",   "Discord",      ICON_DISCORD,  0, 0, 1, 1, 800, 500, discord_open },
+    { "vlc",       "VLC Player",   ICON_VLC,      0, 0, 1, 1, 660, 440, vlc_open },
+    { "git",       "Git Shell",    ICON_GIT,      0, 0, 1, 1, 740, 460, git_app_open },
 };
 
 #define N_APPS ((int)(sizeof(g_apps) / sizeof(g_apps[0])))
