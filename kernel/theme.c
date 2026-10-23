@@ -116,7 +116,7 @@ void theme_draw_wallpaper(void) {
     u8 *old;
     if (!wall_cache || wall_w != w || wall_h != h) {
         if (wall_cache) kfree(wall_cache);
-        wall_cache = (u8 *)kmalloc((size_t)fb.pitch * h);
+        wall_cache = (u8 *)kmalloc((size_t)fb.bstride * h);
         if (!wall_cache) return;
         wall_w = w; wall_h = h; wall_id = -1;
     }
@@ -133,7 +133,7 @@ void theme_draw_wallpaper(void) {
         Rect full = {0, 0, w, h};
         gfx_set_clip(full);
         for (y = 0; y < h; y++)
-            memcpy(fb.back + (u32)y * fb.pitch, wall_cache + (u32)y * fb.pitch, (size_t)w * 4);
+            memcpy(fb.back + (u32)y * fb.bstride, wall_cache + (u32)y * fb.bstride, (size_t)w * 4);
     }
     UNUSED(old);
 }

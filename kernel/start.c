@@ -474,19 +474,21 @@ void gfx_init(void) {
     fb.green_pos = (u8)bi->green_pos; fb.green_size = (u8)bi->green_size;
     fb.blue_pos = (u8)bi->blue_pos; fb.blue_size = (u8)bi->blue_size;
     fb.vram = (u8 *)bi->framebuffer;
-    fb.dual = (fb.bpp == 32);
-    if (fb.dual) {
-        u32 need = fb.pitch * fb.height;
+    fb.bstride = fb.width * 4;
+    fb.dual = 0;
+    {
+        u32 need = fb.bstride * fb.height;
         u8 *buf = (u8 *)kmalloc(need);
         if (buf) {
             fb.back = buf;
             memset(buf, 0, need);
+            fb.dual = 1;
         } else {
-            fb.dual = 0;
+            /* no memory for a back buffer: draw straight into video memory
+             * (only sane for 32 bpp; the compositor still works, just slowly) */
             fb.back = fb.vram;
+            fb.bstride = fb.pitch;
         }
-    } else {
-        fb.back = fb.vram;
     }
 }
 
@@ -505,7 +507,7 @@ void kmain(void) {
     heap_init(0x100000, (MEMKB > 4096 ? MEMKB - 2048 : 2048) * 1024);
     klog("[YoroOS] heap %d KiB", (int)heap_total() / 1024);
     gfx_init();
-    klog("[YoroOS] fb %dx%d bpp=%d dual=%d rgbpos=%d,%d,%d", (int)fb.width, (int)fb.height, (int)fb.bpp, fb.dual, (int)fb.red_pos, (int)fb.green_pos, (int)fb.blue_pos);
+    klog("[YoroOS] fb %dx%d bpp=%d dual=%d rgbpos=%d,%d,%d rgbmask=%d,%d,%d", (int)fb.width, (int)fb.height, (int)fb.bpp, fb.dual, (int)fb.red_pos, (int)fb.green_pos, (int)fb.blue_pos, (int)fb.red_size, (int)fb.green_size, (int)fb.blue_size);
     ki_boot_splash();
     klog("[YoroOS] splash done");
     ata_init();

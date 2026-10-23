@@ -56,7 +56,8 @@ static inline void hlt(void) { __asm__ volatile("hlt"); }
 
 /* ---------------- graphics ---------------- */
 typedef struct {
-    u32 width, height, pitch;   /* pitch in bytes */
+    u32 width, height, pitch;   /* pitch = bytes per scan line in video memory */
+    u32 bstride;                /* bytes per scan line in the 32-bit back buffer */
     u8  bpp;
     u8  red_pos, red_size, green_pos, green_size, blue_pos, blue_size;
     u8 *vram;                   /* real framebuffer */

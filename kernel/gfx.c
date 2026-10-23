@@ -4,10 +4,32 @@
 FBInfo fb;
 static Rect clip;
 
-static inline u32 *rowptr(int y) { return (u32 *)(fb.back + (u32)y * fb.pitch); }
+static inline u32 *rowptr(int y) { return (u32 *)(fb.back + (u32)y * fb.bstride); }
 
 void gfx_set_clip(Rect r) { clip = r; }
 Rect gfx_get_clip(void) { return clip; }
+
+/* 8 bpp modes get a fixed 3-3-2 palette (256 entries, 8 reds, 8 greens, 4 blues) */
+#define PAL_332
+static int palette_ready;
+
+static void palette_install(void) {
+    int i;
+    outb(0x3C8, 0);
+    for (i = 0; i < 256; i++) {
+        u8 r = (u8)(((i >> 5) & 7) * 255 / 7);
+        u8 g = (u8)(((i >> 2) & 7) * 255 / 7);
+        u8 b = (u8)((i & 3) * 255 / 3);
+        outb(0x3C9, r);
+        outb(0x3C9, g);
+        outb(0x3C9, b);
+    }
+    palette_ready = 1;
+}
+
+static inline u8 pack332(u32 v) {
+    return (u8)(((v >> 16) & 0xE0) | (((v >> 8) & 0xE0) >> 3) | ((v & 0xC0) >> 6));
+}
 
 void gfx_clear(Color c) {
     Rect r = {0, 0, (int)fb.width, (int)fb.height};
@@ -16,30 +38,43 @@ void gfx_clear(Color c) {
 }
 
 void gfx_present(void) {
-    u32 pixels = fb.width * fb.height;
-    if (fb.bpp == 32) {
-        u32 y;
-        for (y = 0; y < fb.height; y++)
-            memcpy(fb.vram + y * fb.pitch, fb.back + y * fb.pitch, fb.width * 4);
-    } else {
-        u32 x, y;
-        u32 rp = fb.red_pos, gp = fb.green_pos, bp = fb.blue_pos;
-        for (y = 0; y < fb.height; y++) {
-            u32 *src = rowptr((int)y);
-            u8 *dst = fb.vram + y * fb.pitch;
-            for (x = 0; x < fb.width; x++) {
-                u32 v = src[x];
+    u32 x, y;
+    u32 rp = fb.red_pos, gp = fb.green_pos, bp = fb.blue_pos;
+    u32 rs = fb.red_size ? 8 - fb.red_size : 0;
+    u32 gs = fb.green_size ? 8 - fb.green_size : 0;
+    u32 bs = fb.blue_size ? 8 - fb.blue_size : 0;
+    u8 bpp = fb.bpp;
+
+    if (bpp == 8 && !palette_ready) palette_install();
+
+    for (y = 0; y < fb.height; y++) {
+        u32 *src = rowptr((int)y);
+        u8 *dst = fb.vram + y * fb.pitch;
+        if (bpp == 32 && fb.dual && fb.bstride == fb.pitch) {
+            memcpy(dst, src, fb.width * 4);
+            continue;
+        }
+        for (x = 0; x < fb.width; x++) {
+            u32 v = src[x];
+            if (bpp == 8) {
+                dst[x] = pack332(v);
+            } else if (bpp == 15 || bpp == 16) {
                 u32 r = (v >> 16) & 0xFF, g = (v >> 8) & 0xFF, b = v & 0xFF;
-                u32 o = (r >> (8 - fb.red_size)) << rp |
-                        (g >> (8 - fb.green_size)) << gp |
-                        (b >> (8 - fb.blue_size)) << bp;
-                if (fb.bpp == 32) { *(u32 *)(dst + x * 4) = o; }
-                else if (fb.bpp == 24) { dst[x * 3] = o & 0xFF; dst[x * 3 + 1] = (o >> 8) & 0xFF; dst[x * 3 + 2] = (o >> 16) & 0xFF; }
-                else if (fb.bpp == 16) { *(u16 *)(dst + x * 2) = (u16)o; }
+                u32 o = ((r >> rs) << rp) | ((g >> gs) << gp) | ((b >> bs) << bp);
+                *(u16 *)(dst + x * 2) = (u16)o;
+            } else {
+                u32 r = (v >> 16) & 0xFF, g = (v >> 8) & 0xFF, b = v & 0xFF;
+                u32 o = ((r >> rs) << rp) | ((g >> gs) << gp) | ((b >> bs) << bp);
+                if (bpp == 24) {
+                    dst[x * 3] = (u8)o;
+                    dst[x * 3 + 1] = (u8)(o >> 8);
+                    dst[x * 3 + 2] = (u8)(o >> 16);
+                } else if (bpp == 32) {
+                    *(u32 *)(dst + x * 4) = o;
+                }
             }
         }
     }
-    UNUSED(pixels);
 }
 
 void gfx_present_rect(Rect r) { gfx_present(); }

@@ -18,6 +18,30 @@
     pop     ax
 .endm
 
+/* set a VBE mode from a slot and re-read its mode info; falls through on failure */
+.macro VBETRY slot
+    mov     cx, [\slot]
+    cmp     cx, 0xFFFF
+    je      9f
+    mov     bx, cx
+    or      bx, 0x4000
+    mov     ax, 0x4F02
+    int     0x10
+    cmp     ax, 0x004F
+    jne     9f
+    push    es
+    xor     ax, ax
+    mov     es, ax
+    mov     ax, 0x4F01
+    mov     di, 0x6000
+    int     0x10
+    pop     es
+    cmp     ax, 0x004F
+    jne     9f
+    jmp     vbe_ok
+9:
+.endm
+
 /* boot parameters left by the boot sector */
 .equ P_SHIFT,  0x540          /* word: 9 (512-byte) or 11 (2048-byte CD) */
 .equ P_EXT,    0x542          /* word: int13h LBA available */
@@ -271,39 +295,125 @@ stage2_main:
     mov     [0x5030], eax
 mem_done:
 
-    /* ---- pick a VBE linear framebuffer mode ---- */
-    mov     si, offset mode_list + 0x8000
-vbe_try:
-    mov     cx, [si]
+    /* ---- VBE: enumerate every mode the BIOS offers and take the first one
+     * with a linear framebuffer, preferring 24/32 bpp, then 15/16, then 8.
+     * Old Hyper-V / VirtualBox VGAs have no 32 bpp mode at all, so every
+     * depth the kernel can render into is accepted. ---- */
+    mov     dword ptr [0x6800], 0x32454256     /* "VBE2": ask for a 2.0 block */
+    mov     di, 0x6800
+    mov     ax, 0x4F00
+    int     0x10
+    cmp     ax, 0x004F
+    jne     vbe_none
+    cmp     dword ptr [0x6800], 0x41534556     /* "VESA" */
+    jne     vbe_none
+
+    mov     word ptr [0x6320], 0xFFFF          /* 24/32 bpp slot */
+    mov     dword ptr [0x6322], 0
+    mov     word ptr [0x6328], 0xFFFF          /* 15/16 bpp slot */
+    mov     dword ptr [0x632A], 0
+    mov     word ptr [0x6330], 0xFFFF          /* 8 bpp slot */
+
+    mov     bp, [0x680E]                       /* mode list offset */
+    mov     ax, [0x6810]                       /* mode list segment */
+    mov     es, ax
+.Lenum:
+    mov     cx, es:[bp]
+    add     bp, 2
     cmp     cx, 0xFFFF
-    je      vbe_fail
+    je      .Lpick
+    mov     [0x6340], bp
+    mov     [0x6342], cx
+    push    es                      /* the mode info block goes to 0000:6000 */
+    xor     ax, ax
+    mov     es, ax
     mov     ax, 0x4F01
     mov     di, 0x6000
-    push    si
     int     0x10
-    pop     si
+    pop     es
+    mov     bp, [0x6340]
+    mov     cx, [0x6342]
     cmp     ax, 0x004F
-    jne     vbe_next
-    cmp     byte ptr [0x6019], 32
-    jb      vbe_next
-    cmp     dword ptr [0x6028], 0
-    je      vbe_next
-    mov     bx, [si]
-    or      bx, 0x4000
-    mov     ax, 0x4F02
-    push    si
-    int     0x10
-    pop     si
-    cmp     ax, 0x004F
-    jne     vbe_next
-    jmp     vbe_ok
-vbe_next:
-    add     si, 2
-    jmp     vbe_try
+    jne     .Lenum
+
+    test    word ptr [0x6000], 0x0001          /* supported */
+    jz      .Lenum
+    cmp     dword ptr [0x6028], 0              /* physical base: no LFB, skip */
+    je      .Lenum
+    cmp     word ptr [0x6012], 640             /* x resolution */
+    jb      .Lenum
+    cmp     word ptr [0x6014], 480             /* y resolution */
+    jb      .Lenum
+    mov     al, [0x6019]                       /* bits per pixel */
+    cmp     al, 24
+    jae     .Lslot_hi
+    cmp     al, 15
+    jae     .Lslot_mid
+    cmp     al, 8
+    jne     .Lenum
+    mov     si, 0x6330                         /* 8 bpp: first one wins */
+    cmp     word ptr [si], 0xFFFF
+    jne     .Lenum
+    mov     [si], cx
+    jmp     .Lenum
+.Lslot_hi:
+    mov     si, 0x6320
+    call    keep_biggest
+    jmp     .Lenum
+.Lslot_mid:
+    mov     si, 0x6328
+    call    keep_biggest
+    jmp     .Lenum
+
+.Lpick:
+    VBETRY  0x6320
+    VBETRY  0x6328
+    VBETRY  0x6330
+    jmp     vbe_fail
+
+vbe_none:
+    mov     si, offset msg_novbebios + 0x8000
+    call    print
+    jmp     vbe_hang
 
 vbe_fail:
     mov     si, offset msg_novbe + 0x8000
     call    print
+    mov     si, offset msg_modes + 0x8000
+    call    print
+    /* list up to 8 modes as <mode><bpp> so a screenshot says what is missing */
+    mov     bp, [0x680E]
+    mov     ax, [0x6810]
+    mov     es, ax
+    mov     bx, 8
+.Ldump:
+    mov     cx, es:[bp]
+    add     bp, 2
+    cmp     cx, 0xFFFF
+    je      vbe_hang
+    mov     [0x6340], bp
+    push    bx
+    push    es
+    push    cx
+    xor     ax, ax
+    mov     es, ax
+    mov     ax, 0x4F01
+    mov     di, 0x6000
+    int     0x10
+    pop     dx
+    pop     es
+    pop     bx
+    mov     bp, [0x6340]
+    push    bx
+    call    puthex
+    mov     al, ':'
+    call    putc2
+    movzx   dx, byte ptr [0x6019]
+    call    puthex
+    pop     bx
+    dec     bx
+    jnz     .Ldump
+vbe_hang:
     cli
 hang1:
     hlt
@@ -393,17 +503,82 @@ print:
     popa
     ret
 
-/* ---- data ---- */
-mode_list:
-    .word 0x144     /* 1024x768x32 */
-    .word 0x143     /* 800x600x32  */
-    .word 0x142     /* 640x480x32  */
-    .word 0x144     /* retry 1024x768 in case the first call failed */
-    .word 0x143
-    .word 0x142
+/* si -> slot (mode word, area dword): keep the largest mode of the class */
+keep_biggest:
+    movzx   eax, word ptr [0x6012]
+    movzx   ebx, word ptr [0x6014]
+    imul    eax, ebx
+    cmp     eax, 0x200000                      /* ignore silly big modes */
+    ja      .Lkb_out
+    cmp     eax, 0xC0000                       /* 1024x768 worth of pixels? */
+    ja      .Lkb_big
+    add     eax, 0x2000000                     /* screen fits: bigger is better */
+    jmp     .Lkb_score
+.Lkb_big:
+    shr     eax, 2                             /* too big: smaller is better */
+    neg     eax
+    add     eax, 0x1000000
+.Lkb_score:
+    movzx   edx, byte ptr [0x6019]             /* deeper colour wins */
+    shl     edx, 24
+    add     eax, edx
+    cmp     word ptr [si], 0xFFFF              /* first mode of the class? */
+    je      .Lkb_store
+    cmp     eax, [si + 2]                      /* higher score = better mode */
+    jbe     .Lkb_out
+.Lkb_store:
+    mov     [si + 2], eax
+    mov     [si], cx
+.Lkb_out:
+    ret
 
+/* al -> teletype */
+putc2:
+    push    ax
+    push    bx
+    mov     ah, 0x0E
+    mov     bx, 0x0007
+    int     0x10
+    pop     bx
+    pop     ax
+    ret
+
+/* dx -> two hex digits */
+puthex:
+    push    ax
+    mov     al, dh
+    call    .Lhi
+    mov     al, dl
+    call    .Llo
+    pop     ax
+    ret
+.Lhi:
+    push    ax
+    shr     al, 4
+    call    .Ldig
+    pop     ax
+    ret
+.Llo:
+    push    ax
+    and     al, 0x0F
+    call    .Ldig
+    pop     ax
+    ret
+.Ldig:
+    and     al, 0x0F
+    cmp     al, 10
+    jb      .Lnum
+    add     al, 'A' - 10
+    jmp     putc2
+.Lnum:
+    add     al, '0'
+    jmp     putc2
+
+/* ---- data ---- */
 msg_stage2:   .asciz "YoroOS stage2\r\n"
-msg_novbe:    .asciz "YoroOS: VBE linear framebuffer not available\r\n"
+msg_novbe:    .asciz "YoroOS: no usable VBE linear-framebuffer mode\r\n"
+msg_novbebios: .asciz "YoroOS: this BIOS has no VESA VBE support\r\n"
+msg_modes:    .asciz "modes: "
 msg_nokernel: .asciz "YoroOS: kernel load failed\r\n"
 
 .align 8
