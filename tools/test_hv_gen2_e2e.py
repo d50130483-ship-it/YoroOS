@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Full Hardware-Level Microsoft Hyper-V Generation 2 (UEFI x86-64 -> ExitBootServices -> Native VMBus)
-End-to-End Verification Suite for YoroOS 0.2.6!
+End-to-End Verification Suite for YoroOS 0.2.7!
 
 Emulates real x86-64 CPU via Unicorn Engine + authentic Hyper-V VSP wire protocol:
   - UEFI BootServices + RuntimeServices + SimpleFileSystem + GOP (1024x768x32)
@@ -168,7 +168,7 @@ class HyperVGen2Machine:
             "\\YOROOS.IMG": self.bios_bytes,
         }
         if self.boot_from_vhdx:
-            self.sfs_files["\\EFI\\YOROOS\\INSTALLED.TAG"] = b"YOROOS_INSTALLED=1\nVERSION=0.2.6\n"
+            self.sfs_files["\\EFI\\YOROOS\\INSTALLED.TAG"] = b"YOROOS_INSTALLED=1\nVERSION=0.2.7\n"
 
         # Build EFI_FILE_PROTOCOL handles
         self.next_meta = 0xF0010000
@@ -851,12 +851,12 @@ def run_e2e():
         efi_bytes = f.read()
     with open("build/yoroos.img", "rb") as f:
         bios_bytes = f.read()
-    with open("release/YoroOS-0.2.6.iso", "rb") as f:
+    with open("release/YoroOS-0.2.7.iso", "rb") as f:
         iso_bytes = f.read()
 
     vhdx = bytearray(64 * 1024 * 1024)
 
-    print("=== [VM #1] Booting Live YoroOS 0.2.6 on Hyper-V Generation 2 (UEFI x86-64 -> ExitBootServices -> Native VMBus) ===")
+    print("=== [VM #1] Booting Live YoroOS 0.2.7 on Hyper-V Generation 2 (UEFI x86-64 -> ExitBootServices -> Native VMBus) ===")
     vm1 = HyperVGen2Machine(efi_bytes, bios_bytes, vhdx, iso_bytes=iso_bytes, boot_from_vhdx=False)
     vm1.start_guest()
 
@@ -952,7 +952,7 @@ def run_e2e():
     vm2.start_guest()
     run_until_dirt(vm2, 3)
     vm2.save_screenshot("build/shot_hv_6_installed_yoroboot.png")
-    # Press Enter or let YoroBoot auto-boot the default selected #0 item ("Загрузить YoroOS 0.2.6 с жёсткого диска")!
+    # Press Enter or let YoroBoot auto-boot the default selected #0 item ("Загрузить YoroOS 0.2.7 с жёсткого диска")!
     d0 = vm2.stats["synthvid_dirt"]
     vm2.inject_synthkbd_key(0x1C, False)
     run_until_dirt(vm2, d0 + 6, max_chunks=200)

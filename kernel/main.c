@@ -1,8 +1,8 @@
-/* YoroOS 0.2.6 - YoroBoot Graphical Boot Manager, Kernel Loader & Event Loop
+/* YoroOS 0.2.7 - YoroBoot Graphical Boot Manager, Kernel Loader & Event Loop
  *
  * ZERO Windows 4-square logos anywhere.
  * Provides:
- *   1. Authentic interactive YoroBoot 0.2.6 Boot Menu (keyboard + mouse + 2.5s auto-boot):
+ *   1. Authentic interactive YoroBoot 0.2.7 Boot Menu (keyboard + mouse + 2.5s auto-boot):
  *      - Automatically detects installed YoroFS2 volumes on VHDX / NVMe / SATA disks
  *        and boots directly into the installed OS even if the Live ISO remains attached!
  *      - Cleanly boots OS Installer or Live RAM Desktop on fresh unformatted VMs.
@@ -65,7 +65,7 @@ void ki_boot_splash(void) {
         "Подключение шин VMBus / UEFI / контроллеров ввода...",
         "Сканирование разделов GPT и накопителей...",
         "Загрузка шрифтового атласа и графической подсистемы...",
-        "Запуск окружения YoroOS 0.2.6..."
+        "Запуск окружения YoroOS 0.2.7..."
     };
     int cx = (int)fb.width / 2;
     int cy = (int)fb.height * 40 / 100;
@@ -74,7 +74,7 @@ void ki_boot_splash(void) {
     for (i = 0; i < 5; i++) {
         gfx_clear(RGB(11, 15, 25));
         draw_yoro_boot_emblem(cx, cy, 34);
-        draw_text_center_face(FACE_TITLE, cx, cy + 54, "YoroOS 0.2.6", C_WHITE);
+        draw_text_center_face(FACE_TITLE, cx, cy + 54, "YoroOS 0.2.7", C_WHITE);
         draw_text_center_face(FACE_SMALL, cx, cy + 84, hal_arch_name(), RGB(148, 163, 184));
         ui_progress((Rect){cx - 170, cy + 122, 340, 8}, (i + 1) * 20, RGB(56, 189, 248));
         draw_text_center_face(FACE_SMALL, cx, cy + 142, kStages[i], RGB(100, 116, 139));
@@ -109,16 +109,16 @@ static int run_yoroboot_menu(int disk_installed) {
         if (disk_installed >= 0) {
             memset(&di, 0, sizeof(di));
             hal_disk_info(disk_installed, &di);
-            snprintf(labels[0], sizeof(labels[0]), "Загрузить YoroOS 0.2.6 с жёсткого диска");
+            snprintf(labels[0], sizeof(labels[0]), "Загрузить YoroOS 0.2.7 с жёсткого диска");
             snprintf(subs[0], sizeof(subs[0]), "Установленная система на %s (том YoroFS2)", di.model);
             snprintf(labels[1], sizeof(labels[1]), "Установщик / Восстановление YoroOS");
             snprintf(subs[1], sizeof(subs[1]), "Переразметка GPT, переустановка загрузчика или смена редакции");
             snprintf(labels[2], sizeof(labels[2]), "Запустить чистую Live-сессию в ОЗУ");
             snprintf(subs[2], sizeof(subs[2]), "Работа без монтирования и изменения жёсткого диска");
         } else {
-            snprintf(labels[0], sizeof(labels[0]), "Установить YoroOS 0.2.6 на жёсткий диск");
+            snprintf(labels[0], sizeof(labels[0]), "Установить YoroOS 0.2.7 на жёсткий диск");
             snprintf(subs[0], sizeof(subs[0]), "Разметка GPT, создание системного раздела UEFI FAT16 и запись ОС");
-            snprintf(labels[1], sizeof(labels[1]), "Запустить YoroOS 0.2.6 Live (без установки)");
+            snprintf(labels[1], sizeof(labels[1]), "Запустить YoroOS 0.2.7 Live (без установки)");
             snprintf(subs[1], sizeof(subs[1]), "Мгновенный запуск рабочего стола в оперативной памяти");
         }
 

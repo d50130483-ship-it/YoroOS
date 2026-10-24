@@ -1,4 +1,4 @@
-/* YoroOS 0.2.6 - Native Bare-Metal Microsoft Hyper-V Generation 2 Driver Stack
+/* YoroOS 0.2.7 - Native Bare-Metal Microsoft Hyper-V Generation 2 Driver Stack
  *
  * Verified byte-for-byte against mainline Linux 6.x:
  *   include/hyperv/hvgdk_mini.h, hvhdk_mini.h, include/linux/hyperv.h,
@@ -1132,10 +1132,14 @@ static int hv_init_mouse(void) {
                     *(u32 *)(ack + 0) = 3U;
                     *(u32 *)(ack + 4) = 1U;
                     ack[8] = 0U;
-                    hv_chan_send_pipe(&g_chans[g_chan_mouse], ack, 9U, 0);
+                    /* Linux hid-hyperv requests a completion for the ACK; the host waits for it */
+                    hv_chan_send_pipe(&g_chans[g_chan_mouse], ack, 9U, VMBUS_PKT_FLAG_COMPLETION);
                 }
                 got_info = 1;
                 break;
+            }
+            if (mtype == 1U && n >= 21) { /* SYNTH_HID_PROTOCOL_RESPONSE: approved byte */
+                klog("[hv-hid] protocol response approved=%d", (int)g_rx_pkt[16 + 4]);
             }
             UNUSED(msize);
         }
