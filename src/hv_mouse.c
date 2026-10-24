@@ -279,7 +279,12 @@ static struct {
 
     u32 x, y, buttons;
     u32 max_x, max_y;
+    hvm_trace_fn trace;
 } g;
+
+static void tr(u32 step) {
+    if (g.trace) g.trace(step);
+}
 
 static u8 g_rx[8192];
 
@@ -655,15 +660,19 @@ static void carve_pool(u8 *pool) {
     g.ring_base = p; p += RING_PAGES * 4096U;
 }
 
-int hvm_init(u8 *pool, u64 pool_bytes) {
+int hvm_init(u8 *pool, u64 pool_bytes, hvm_trace_fn trace) {
     int connected = 0;
 
+    g.trace = trace;
+    tr(2);
     if (!hvm_detect()) return -1;
+    tr(3);
     if (!pool || pool_bytes < (u64)HVM_POOL_PAGES * 4096ULL) return -2;
 
     /* The pool is page-aligned (UEFI page allocation) and identity-mapped. */
     memset(pool, 0, (u64)HVM_POOL_PAGES * 4096ULL);
     carve_pool(pool);
+    tr(4);
 
     {
         u32 eax, ebx, ecx, edx;
@@ -679,6 +688,7 @@ int hvm_init(u8 *pool, u64 pool_bytes) {
     wrmsr(HV_MSR_SIEFP, (u64)(uptr)g.siefp | 1ULL);
     wrmsr(HV_MSR_SINT2, (u64)VMBUS_SINT_VECTOR | SINT_MASKED | SINT_AUTO_EOI);
     wrmsr(HV_MSR_SCONTROL, 1ULL);
+    tr(5);
 
     /* Drop any connection the firmware's VMBus driver still holds. */
     {
@@ -687,6 +697,7 @@ int hvm_init(u8 *pool, u64 pool_bytes) {
         int r2 = post_msg(1U, &unl, sizeof(unl));
         if (r1 == 0 || r2 == 0) wait_ctrl(CM_UNLOAD_RESPONSE, NULL, 0, 450);
     }
+    tr(6);
 
     g.next_gpadl = 0x000E1000U;
     g.offer_cnt = 0;
@@ -715,6 +726,7 @@ int hvm_init(u8 *pool, u64 pool_bytes) {
         }
     }
     if (!connected) return -3;
+    tr(7);
 
     /* Ask for every offered channel, then wait for the end marker. */
     {
@@ -722,6 +734,7 @@ int hvm_init(u8 *pool, u64 pool_bytes) {
         post_msg(g.msg_conn_id, &req, sizeof(req));
         wait_ctrl(CM_ALLOFFERS_DELIVERED, NULL, 0, 1500);
     }
+    tr(8);
 
     /* Open the mouse channel only. */
     for (u32 i = 0; i < g.offer_cnt; i++) {
@@ -733,10 +746,12 @@ int hvm_init(u8 *pool, u64 pool_bytes) {
         }
     }
     if (!g.mouse_ok) return -4;
+    tr(9);
 
     g.x = g.max_x / 2;
     g.y = g.max_y / 2;
     g.ready = 1;
+    tr(10);
     return 0;
 }
 

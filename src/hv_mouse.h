@@ -16,8 +16,11 @@
 /* 1 if running under the Microsoft hypervisor. Touches only CPUID. */
 int hvm_detect(void);
 
-/* Connects to VMBus and opens the mouse channel. Returns 0 on success, or a negative stage code. */
-int hvm_init(u8 *pool, u64 pool_bytes);
+/* Called at each step of hvm_init() with the step number (debug aid). */
+typedef void (*hvm_trace_fn)(u32 step);
+
+/* Connects to VMBus and opens the mouse channel. Returns 0 on success, or a negative error code. */
+int hvm_init(u8 *pool, u64 pool_bytes, hvm_trace_fn trace);
 
 /* Drains pending input. Returns 1 if the pointer position or buttons changed. */
 int hvm_poll(void);

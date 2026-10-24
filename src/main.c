@@ -28,6 +28,12 @@ typedef EFI_STATUS (*allocate_pages_fn)(u32 type, u32 memory_type, u64 pages, u6
 
 static EFI_BOOT_SERVICES *g_bs;
 
+/* Debug aid for the Hyper-V mouse bring-up: a black block per step at the top left.
+ * The last block on screen shows how far the driver got. Remove when the driver works. */
+#define DEBUG_STEPS 1
+static u32 *g_fb;
+static u32 g_pitch, g_format;
+
 /* Writes one pixel in the framebuffer's native channel order. */
 static inline u32 pack_rgb(u32 format, u32 r, u32 g, u32 b) {
     if (format == 1) return (r << 16) | (g << 8) | b; /* BGR: bytes B,G,R,x */
@@ -76,6 +82,15 @@ static void draw_cursor(u32 *fb, u32 pitch, u32 w, u32 h, u32 format, u32 x0, u3
     }
 }
 
+#if DEBUG_STEPS
+static void step_block(u32 step) {
+    u32 x0 = 8 + step * 24, y0 = 8;
+    for (u32 y = y0; y < y0 + 16; y++)
+        for (u32 x = x0; x < x0 + 16; x++)
+            g_fb[(u64)y * g_pitch + x] = pack_rgb(g_format, 0, 0, 0);
+}
+#endif
+
 /* Erases the pointer at its old place, then draws it at the new one. */
 static void move_cursor(u32 *fb, u32 pitch, u32 w, u32 h, u32 format,
                         u32 old_x, u32 old_y, u32 x0, u32 y0) {
@@ -102,6 +117,12 @@ EFI_STATUS EfiMain(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     u32 *fb = (u32 *)(u64)mode->FrameBufferBase;
 
     paint_background(fb, pitch, w, h, format);
+    g_fb = fb;
+    g_pitch = pitch;
+    g_format = format;
+#if DEBUG_STEPS
+    step_block(1);
+#endif
 
     /* On Hyper-V start the synthetic mouse; anywhere else the pointer stays centred. */
     int mouse = 0;
@@ -110,7 +131,11 @@ EFI_STATUS EfiMain(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
         EFI_STATUS st_pool = ((allocate_pages_fn)g_bs->AllocatePages)(
             ALLOCATE_ANY_PAGES, LOADER_CODE, HVM_POOL_PAGES, &pool);
         if (st_pool == 0 && pool != 0)
-            mouse = hvm_init((u8 *)(u64)pool, (u64)HVM_POOL_PAGES * 4096ULL) == 0;
+#if DEBUG_STEPS
+            mouse = hvm_init((u8 *)(u64)pool, (u64)HVM_POOL_PAGES * 4096ULL, step_block) == 0;
+#else
+            mouse = hvm_init((u8 *)(u64)pool, (u64)HVM_POOL_PAGES * 4096ULL, 0) == 0;
+#endif
     }
 
     u32 cur_x = (w - CURSOR_W) / 2;
