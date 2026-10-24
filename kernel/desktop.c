@@ -184,17 +184,60 @@ static Rect start_rect(void) {
     return (Rect){10, (int)fb.height - wm_taskbar_height() - h - 8, 610, h};
 }
 
+/* Start panel controls: flat, square corners, 1px borders (no acrylic, no pills) */
+static void sm_button(Rect r, const char *label, int hover, int danger) {
+    Color bg, fg, bd;
+    int ty = r.y + (r.h - font_line_height(FACE_UI)) / 2;
+    if (danger) {
+        bg = hover ? RGB(220, 38, 38) : RGB(185, 28, 28);
+        fg = C_WHITE;
+        bd = bg;
+    } else {
+        bg = hover ? theme->accent : theme->card_bg;
+        fg = hover ? C_WHITE : theme->text_main;
+        bd = RGBA(130, 145, 170, 80);
+    }
+    fill_rect(r, bg);
+    draw_rect(r, bd);
+    draw_text_center(r.x + r.w / 2, ty, label, fg);
+}
+
+static void sm_field(Rect r, const char *text, int caret, int focused, const char *placeholder) {
+    int ty = r.y + (r.h - font_line_height(FACE_UI)) / 2;
+    fill_rect(r, theme->card_bg);
+    draw_rect(r, focused ? theme->accent : RGBA(130, 145, 170, 80));
+    if (text && *text) {
+        draw_text_clipped(r.x + 10, ty, r.w - 20, text, theme->text_main);
+    } else if (placeholder && *placeholder) {
+        draw_text_clipped(r.x + 10, ty, r.w - 20, placeholder, theme->text_muted);
+    }
+    if (focused && caret >= 0 && text) {
+        char sub[256];
+        int n = caret < (int)sizeof(sub) - 1 ? caret : (int)sizeof(sub) - 1;
+        int cx;
+        memcpy(sub, text, (size_t)n);
+        sub[n] = 0;
+        cx = r.x + 10 + text_width(sub);
+        if (cx < r.x + r.w - 8) ui_caret(cx, ty + 1, font_line_height(FACE_UI) - 2, theme->accent);
+    }
+}
+
 static void draw_start_menu(int mx, int my) {
     Rect sm = start_rect();
-    Rect search_r = {sm.x + 18, sm.y + 16, sm.w - 36, 36};
+    Rect search_r = {sm.x + 18, sm.y + 16, sm.w - 36, 34};
     Rect left_list = {sm.x + 16, sm.y + 64, 246, sm.h - 122};
     int right_x = sm.x + 278, right_w = sm.w - 294;
     int i, y, tile_idx = 0;
+    Rect pwr_lock = {sm.x + sm.w - 306, sm.y + sm.h - 40, 88, 30};
+    Rect pwr_rb = {sm.x + sm.w - 210, sm.y + sm.h - 40, 96, 30};
+    Rect pwr_off = {sm.x + sm.w - 106, sm.y + sm.h - 40, 90, 30};
 
-    fx_acrylic_panel(sm, 10, theme->menu_bg, RGBA(140, 160, 190, 90), 12);
-    ui_textfield(search_r, g_search, g_search_caret, 1, "Поиск приложений, настроек и команд...");
+    /* Solid panel, square corners */
+    fill_rect(sm, theme->menu_bg);
+    draw_rect(sm, RGBA(130, 145, 170, 90));
+    sm_field(search_r, g_search, g_search_caret, 1, "Поиск приложений и настроек");
 
-    /* Left Column: All Applications */
+    /* Left column: all applications, flat rows */
     draw_text_small(left_list.x + 6, left_list.y - 2, "Все приложения", theme->text_muted);
     y = left_list.y + 18 - g_start_scroll;
     {
@@ -208,20 +251,19 @@ static void draw_start_menu(int mx, int my) {
                 continue;
             if (y + 34 >= left_list.y + 16 && y < left_list.y + left_list.h) {
                 if (pt_in(mx, my, row))
-                    fill_round_rect_alpha(row, 6, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 56));
+                    fill_rect(row, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 56));
                 icon_draw(a->icon, row.x + 8, row.y + 5, 24);
-                draw_text_clipped(row.x + 40, row.y + 8, row.w - 72, a->name, theme->text_main);
+                draw_text_clipped(row.x + 40, row.y + 8, row.w - 90, a->name, theme->text_main);
                 if (!a->installed)
-                    ui_badge((Rect){row.x + row.w - 58, row.y + 8, 52, 18}, "Скачать",
-                             RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 48), theme->accent);
+                    draw_text_small(row.x + row.w - 52, row.y + 10, "Скачать", theme->text_muted);
             }
             y += 36;
         }
         gfx_set_clip(saved);
     }
 
-    /* Right Column: Pinned Tiles Grid (3 columns) */
-    draw_text_small(right_x, left_list.y - 2, "Закреплённые и рекомендуемые", theme->text_muted);
+    /* Right column: pinned tiles, flat squares */
+    draw_text_small(right_x, left_list.y - 2, "Закреплённые", theme->text_muted);
     for (i = 0; i < app_count() && tile_idx < 12; i++) {
         App *a = app_by_index(i);
         int tc, tr, tw = (right_w - 16) / 3, th = 76;
@@ -232,31 +274,26 @@ static void draw_start_menu(int mx, int my) {
         tile = (Rect){right_x + tc * (tw + 8), left_list.y + 20 + tr * (th + 8), tw, th};
         if (tile.y + tile.h <= sm.y + sm.h - 58) {
             int hov = pt_in(mx, my, tile);
-            fill_round_rect(tile, 7, hov
-                ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 70)
-                : theme->card_bg);
-            draw_round_rect(tile, 7, hov ? theme->accent : RGBA(130, 145, 170, 52));
+            fill_rect(tile, hov ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 70) : theme->card_bg);
+            draw_rect(tile, hov ? theme->accent : RGBA(130, 145, 170, 52));
             icon_draw(a->icon, tile.x + (tile.w - 28) / 2, tile.y + 10, 28);
             {
                 char tlbl[64];
                 fit_utf8_label(a->name, tile.w - 10, tlbl, sizeof(tlbl));
                 draw_text_center_face(FACE_SMALL, tile.x + tile.w / 2, tile.y + 46, tlbl, theme->text_main);
             }
-            if (!a->installed)
-                fill_circle(tile.x + tile.w - 10, tile.y + 10, 4, theme->accent);
         }
         tile_idx++;
     }
 
-    /* Bottom Footer Bar: Avatar + Username + Lock / Reboot / Shutdown */
+    /* Footer: user + flat power buttons */
     hline(sm.x + 14, sm.x + sm.w - 14, sm.y + sm.h - 50, RGBA(130, 145, 170, 58));
     avatar_draw(sys_profile.avatar_id, sm.x + 20, sm.y + sm.h - 41, 30);
     draw_text_bold(sm.x + 58, sm.y + sm.h - 40, sys_profile.username, theme->text_main);
     draw_text_small(sm.x + 58, sm.y + sm.h - 22, edition_name(sys_profile.edition), theme->text_muted);
-
-    ui_button((Rect){sm.x + sm.w - 306, sm.y + sm.h - 40, 88, 30}, "Блокир.", pt_in(mx, my, (Rect){sm.x + sm.w - 306, sm.y + sm.h - 40, 88, 30}), 0);
-    ui_button((Rect){sm.x + sm.w - 210, sm.y + sm.h - 40, 96, 30}, "Перезагр.", pt_in(mx, my, (Rect){sm.x + sm.w - 210, sm.y + sm.h - 40, 96, 30}), 0);
-    ui_button_danger((Rect){sm.x + sm.w - 106, sm.y + sm.h - 40, 90, 30}, "Выключить", pt_in(mx, my, (Rect){sm.x + sm.w - 106, sm.y + sm.h - 40, 90, 30}));
+    sm_button(pwr_lock, "Блокир.", pt_in(mx, my, pwr_lock), 0);
+    sm_button(pwr_rb, "Перезагр.", pt_in(mx, my, pwr_rb), 0);
+    sm_button(pwr_off, "Выключить", pt_in(mx, my, pwr_off), 1);
 }
 
 static Rect action_rect(void) {
