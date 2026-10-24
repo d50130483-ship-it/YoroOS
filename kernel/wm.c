@@ -283,7 +283,6 @@ void wm_handle_event(YoroEvent *e) {
     if (e->type == EV_MOUSE_MOVE) wm_dirty = 1;
 
     if (e->type == EV_KEY) {
-        if (e->key == KEY_WIN || (e->ctrl && e->key == KEY_ESC)) { startmenu_toggle(); return; }
         if (e->alt && e->key == KEY_TAB) { wm_alt_tab(); return; }
         if (e->alt && e->key == KEY_F4)  { if (wm_focused()) wm_close(wm_focused()); return; }
     }

@@ -6,11 +6,9 @@ extern const u8 *fs_builtin_pkg_bytes(const char *id, int *out_len, const char *
 static App g_apps[] = {
     /* Core System Applications (clean short names — zero truncation on desktop/tiles!) */
     { "explorer",  "Файлы",        ICON_COMPUTER, 1, 1, 1, 0, 820, 520, explorer_open },
-    { "browser",   "Браузер",      ICON_BROWSER,  1, 1, 1, 0, 860, 540, browser_open },
     { "store",     "Приложения",   ICON_STORE,    1, 1, 1, 0, 840, 530, store_open },
     { "terminal",  "Терминал",     ICON_TERMINAL, 1, 1, 1, 0, 760, 470, terminal_open },
     { "settings",  "Настройки",    ICON_SETTINGS, 1, 1, 1, 0, 820, 520, settings_open },
-    { "installer", "Установщик",   ICON_SETUP,    1, 1, 1, 0, 820, 540, installer_open },
     { "notepad",   "Заметки",      ICON_NOTEPAD,  1, 1, 1, 0, 680, 450, notepad_open },
     { "calc",      "Калькулятор",  ICON_CALC,     1, 1, 1, 0, 340, 450, calc_open },
     { "paint",     "Рисование",    ICON_PAINT,    1, 1, 1, 0, 740, 490, paint_open },

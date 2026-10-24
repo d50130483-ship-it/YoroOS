@@ -155,8 +155,6 @@ static void set_draw(Window *w, Rect r) {
             draw_text_bold(c.x + 48, c.y + 13, di.model, theme->text_main);
         }
 
-        ui_button((Rect){bx, by + 310, 260, 40}, "Открыть Установщик YoroOS ->",
-                  pt_in(mx, my, (Rect){bx, by + 310, 260, 40}), 1);
         if (sys_profile.installed_disk_idx >= 0) {
             ui_button((Rect){bx + 272, by + 310, 250, 40}, "Синхронизировать диск сейчас",
                       pt_in(mx, my, (Rect){bx + 272, by + 310, 250, 40}), 0);
@@ -269,7 +267,6 @@ static void set_event(Window *w, YoroEvent *e) {
         }
         wm_invalidate();
     } else if (st->sec == 4) {
-        if (pt_in(e->x, e->y, (Rect){bx, by + 310, 260, 40})) installer_open();
         if (sys_profile.installed_disk_idx >= 0 &&
             pt_in(e->x, e->y, (Rect){bx + 272, by + 310, 250, 40})) {
             disk_save_yorofs(sys_profile.installed_disk_idx);

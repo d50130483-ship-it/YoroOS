@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Full Hardware-Level Microsoft Hyper-V Generation 2 (UEFI x86-64 -> ExitBootServices -> Native VMBus)
-End-to-End Verification Suite for YoroOS 0.2.9!
+End-to-End Verification Suite for YoroOS 0.2.10!
 
 Emulates real x86-64 CPU via Unicorn Engine + authentic Hyper-V VSP wire protocol:
   - UEFI BootServices + RuntimeServices + SimpleFileSystem + GOP (1024x768x32)
@@ -18,6 +18,7 @@ Emulates real x86-64 CPU via Unicorn Engine + authentic Hyper-V VSP wire protoco
 """
 import os, sys, struct, subprocess
 import pefile
+import capstone
 from PIL import Image
 from unicorn import (
     Uc, UC_ARCH_X86, UC_MODE_64,
@@ -168,7 +169,7 @@ class HyperVGen2Machine:
             "\\YOROOS.IMG": self.bios_bytes,
         }
         if self.boot_from_vhdx:
-            self.sfs_files["\\EFI\\YOROOS\\INSTALLED.TAG"] = b"YOROOS_INSTALLED=1\nVERSION=0.2.9\n"
+            self.sfs_files["\\EFI\\YOROOS\\INSTALLED.TAG"] = b"YOROOS_INSTALLED=1\nVERSION=0.2.10\n"
 
         # Build EFI_FILE_PROTOCOL handles
         self.next_meta = 0xF0010000
@@ -821,19 +822,25 @@ class HyperVGen2Machine:
         self.uc.hook_add(UC_HOOK_INSN, on_in,    None, 1, 0, UC_X86_INS_IN)
         self.uc.hook_add(UC_HOOK_CODE, on_code,  None, self.THUNK_BASE, self.THUNK_BASE + 0x10000)
 
-        # Binary-patch exact 2-byte `rdmsr` (0F 32 -> E6 E9) and `wrmsr` (0F 30 -> E6 EA) in guest RAM
-        # so Unicorn TCG executes 100% of guest code with full native direct block chaining (250+ MIPS)!
+        # Binary-patch the real `rdmsr` (0F 32 -> E6 E9) and `wrmsr` (0F 30 -> E6 EA) instructions in guest
+        # RAM so Unicorn can trap them through `out` ports (see on_out). Only instruction starts found by
+        # disassembly are patched: a raw byte scan would also rewrite 0F 30 / 0F 32 bytes that sit inside
+        # RIP-relative displacements (e.g. `cmp qword [rip+disp], 0`), which corrupts global-variable access.
         pe = pefile.PE(data=self.efi_bytes)
+        md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_64)
+        n_patched = 0
         for sec in pe.sections:
             if sec.IMAGE_SCN_MEM_EXECUTE:
                 base = self.IMG_BASE + sec.VirtualAddress
                 code_bytes = bytearray(self.uc.mem_read(base, sec.Misc_VirtualSize))
-                for i in range(len(code_bytes) - 1):
-                    if code_bytes[i] == 0x0F and code_bytes[i + 1] == 0x32:
-                        code_bytes[i] = 0xE6; code_bytes[i + 1] = 0xE9
-                    elif code_bytes[i] == 0x0F and code_bytes[i + 1] == 0x30:
-                        code_bytes[i] = 0xE6; code_bytes[i + 1] = 0xEA
+                for ins in md.disasm(bytes(code_bytes), 0):
+                    if ins.mnemonic == "rdmsr" and ins.size == 2:
+                        code_bytes[ins.address] = 0xE6; code_bytes[ins.address + 1] = 0xE9; n_patched += 1
+                    elif ins.mnemonic == "wrmsr" and ins.size == 2:
+                        code_bytes[ins.address] = 0xE6; code_bytes[ins.address + 1] = 0xEA; n_patched += 1
                 self.uc.mem_write(base, bytes(code_bytes))
+        assert n_patched > 0, "no rdmsr/wrmsr instructions found in guest code"
+        print(f"[harness] patched {n_patched} rdmsr/wrmsr instructions in guest code")
 
     def start_guest(self):
         self.uc.reg_write(UC_X86_REG_RSP, 0x01F00000 - 0x28)
@@ -851,12 +858,12 @@ def run_e2e():
         efi_bytes = f.read()
     with open("build/yoroos.img", "rb") as f:
         bios_bytes = f.read()
-    with open("release/YoroOS-0.2.9.iso", "rb") as f:
+    with open("release/YoroOS-0.2.10.iso", "rb") as f:
         iso_bytes = f.read()
 
     vhdx = bytearray(64 * 1024 * 1024)
 
-    print("=== [VM #1] Booting Live YoroOS 0.2.9 on Hyper-V Generation 2 (UEFI x86-64 -> ExitBootServices -> Native VMBus) ===")
+    print("=== [VM #1] Booting Live YoroOS 0.2.10 on Hyper-V Generation 2 (UEFI x86-64 -> ExitBootServices -> Native VMBus) ===")
     vm1 = HyperVGen2Machine(efi_bytes, bios_bytes, vhdx, iso_bytes=iso_bytes, boot_from_vhdx=False)
     vm1.start_guest()
 
@@ -877,29 +884,26 @@ def run_e2e():
     vm1.save_screenshot("build/shot_hv_1_yoroboot.png")
     print("[OK] Captured build/shot_hv_1_yoroboot.png (YoroBoot Manager!)")
 
-    # Press Enter via Hyper-V SynthKbd -> 5 boot splash frames + full Desktop + Installer frame = +6 dirts!
+    # YoroBoot: Enter starts the system. With no installed disk the text installer appears.
     d0 = vm1.stats["synthvid_dirt"]
     vm1.inject_synthkbd_key(0x1C, False)
     run_until_dirt(vm1, d0 + 6, max_chunks=200)
-    vm1.save_screenshot("build/shot_hv_2_desktop.png")
-    print("[OK] Captured build/shot_hv_2_desktop.png (Live Desktop + Installer Window!)")
+    vm1.save_screenshot("build/shot_hv_2_installer.png")
+    print("[OK] Captured build/shot_hv_2_installer.png (text installer, disk list)")
 
-    # Mouse is live: move the SynthHID pointer over the YoroOS menu button and click it.
-    d0 = vm1.stats["synthvid_dirt"]
-    vm1.move_and_click_mouse(26, 748, click=True)
-    run_until_dirt(vm1, d0 + 2)
-    vm1.save_screenshot("build/shot_hv_3_startmenu.png")
-    print("[OK] Captured build/shot_hv_3_startmenu.png (Start menu click via SynthHID mouse)")
+    def key_and_wait(code):
+        d = vm1.stats["synthvid_dirt"]
+        vm1.inject_synthkbd_key(code, False)
+        run_until_dirt(vm1, d + 1, max_chunks=60)
 
-    # Installer wizard (fullscreen Setup in SCREEN_SETUP): Enter -> disks -> profile -> start install.
+    # Text installer keys: 1 = first disk, Enter; Enter = keep "user"; y e s, Enter = confirm
+    key_and_wait(0x02)                       # '1'
+    key_and_wait(0x1C)                       # Enter -> username
+    key_and_wait(0x1C)                       # Enter -> confirm step
+    for code in (0x15, 0x12, 0x1F):          # y, e, s
+        key_and_wait(code)
+    key_and_wait(0x1C)                       # Enter -> start the installation
     d0 = vm1.stats["synthvid_dirt"]
-    vm1.inject_synthkbd_key(0x1C, False)
-    run_until_dirt(vm1, d0 + 2)
-    d0 = vm1.stats["synthvid_dirt"]
-    vm1.inject_synthkbd_key(0x1C, False)
-    run_until_dirt(vm1, d0 + 2)
-    d0 = vm1.stats["synthvid_dirt"]
-    vm1.inject_synthkbd_key(0x1C, False)
     run_until_dirt(vm1, d0 + 3)
     vm1.save_screenshot("build/shot_hv_4_installing.png")
     print("[OK] Captured build/shot_hv_4_installing.png (installer write phase)")
@@ -952,7 +956,7 @@ def run_e2e():
     vm2.start_guest()
     run_until_dirt(vm2, 3)
     vm2.save_screenshot("build/shot_hv_6_installed_yoroboot.png")
-    # Press Enter or let YoroBoot auto-boot the default selected #0 item ("Загрузить YoroOS 0.2.9 с жёсткого диска")!
+    # Press Enter or let YoroBoot auto-boot the default selected #0 item ("Загрузить YoroOS 0.2.10 с жёсткого диска")!
     d0 = vm2.stats["synthvid_dirt"]
     vm2.inject_synthkbd_key(0x1C, False)
     run_until_dirt(vm2, d0 + 6, max_chunks=200)
@@ -960,11 +964,6 @@ def run_e2e():
     d0 = vm2.stats["synthvid_dirt"]
     run_until_dirt(vm2, d0 + 14, max_chunks=400)
     vm2.save_screenshot("build/shot_hv_7_installed_desktop.png")
-    # Open the Start menu on the installed desktop (VM #2) and capture it
-    vm2.move_and_click_mouse(26, 744, click=True)
-    d0 = vm2.stats["synthvid_dirt"]
-    run_until_dirt(vm2, d0 + 4, max_chunks=300)
-    vm2.save_screenshot("build/shot_hv_8_startmenu.png")
     print("VM #2 Serial Log:\n" + vm2.stats["serial_log"])
     print("=== ALL HYPER-V GEN 2 HARDWARE & PERSISTENT INSTALL E2E CHECKS PASSED 100%! ===")
 

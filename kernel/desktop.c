@@ -17,11 +17,7 @@ static u32 g_last_desk_click = 0;
 static int g_last_desk_idx = -1;
 
 /* Start Menu & Action Center state */
-static int g_start_open = 0;
 static int g_action_open = 0;
-static char g_search[64] = "";
-static int  g_search_len = 0, g_search_caret = 0;
-static int  g_start_scroll = 0;
 
 /* Universal Popup Context Menu */
 #define MAX_CTX_ITEMS 10
@@ -89,7 +85,6 @@ void desktop_rebuild(void) {
 }
 
 void desktop_init(void) {
-    g_start_open = 0;
     g_action_open = 0;
     g_ctx.open = 0;
     desktop_rebuild();
@@ -169,132 +164,8 @@ void desktop_draw(void) {
     }
 }
 
-int startmenu_open(void) { return g_start_open; }
-void startmenu_toggle(void) {
-    g_start_open = !g_start_open;
-    g_action_open = 0;
-    g_ctx.open = 0;
-    wm_invalidate();
-}
 
-static Rect start_rect(void) {
-    int h = 510;
-    if (h > (int)fb.height - wm_taskbar_height() - 24)
-        h = (int)fb.height - wm_taskbar_height() - 24;
-    return (Rect){10, (int)fb.height - wm_taskbar_height() - h - 8, 610, h};
-}
 
-/* Start panel controls: flat, square corners, 1px borders (no acrylic, no pills) */
-static void sm_button(Rect r, const char *label, int hover, int danger) {
-    Color bg, fg, bd;
-    int ty = r.y + (r.h - font_line_height(FACE_UI)) / 2;
-    if (danger) {
-        bg = hover ? RGB(220, 38, 38) : RGB(185, 28, 28);
-        fg = C_WHITE;
-        bd = bg;
-    } else {
-        bg = hover ? theme->accent : theme->card_bg;
-        fg = hover ? C_WHITE : theme->text_main;
-        bd = RGBA(130, 145, 170, 80);
-    }
-    fill_rect(r, bg);
-    draw_rect(r, bd);
-    draw_text_center(r.x + r.w / 2, ty, label, fg);
-}
-
-static void sm_field(Rect r, const char *text, int caret, int focused, const char *placeholder) {
-    int ty = r.y + (r.h - font_line_height(FACE_UI)) / 2;
-    fill_rect(r, theme->card_bg);
-    draw_rect(r, focused ? theme->accent : RGBA(130, 145, 170, 80));
-    if (text && *text) {
-        draw_text_clipped(r.x + 10, ty, r.w - 20, text, theme->text_main);
-    } else if (placeholder && *placeholder) {
-        draw_text_clipped(r.x + 10, ty, r.w - 20, placeholder, theme->text_muted);
-    }
-    if (focused && caret >= 0 && text) {
-        char sub[256];
-        int n = caret < (int)sizeof(sub) - 1 ? caret : (int)sizeof(sub) - 1;
-        int cx;
-        memcpy(sub, text, (size_t)n);
-        sub[n] = 0;
-        cx = r.x + 10 + text_width(sub);
-        if (cx < r.x + r.w - 8) ui_caret(cx, ty + 1, font_line_height(FACE_UI) - 2, theme->accent);
-    }
-}
-
-static void draw_start_menu(int mx, int my) {
-    Rect sm = start_rect();
-    Rect search_r = {sm.x + 18, sm.y + 16, sm.w - 36, 34};
-    Rect left_list = {sm.x + 16, sm.y + 64, 246, sm.h - 122};
-    int right_x = sm.x + 278, right_w = sm.w - 294;
-    int i, y, tile_idx = 0;
-    Rect pwr_lock = {sm.x + sm.w - 306, sm.y + sm.h - 40, 88, 30};
-    Rect pwr_rb = {sm.x + sm.w - 210, sm.y + sm.h - 40, 96, 30};
-    Rect pwr_off = {sm.x + sm.w - 106, sm.y + sm.h - 40, 90, 30};
-
-    /* Solid panel, square corners */
-    fill_rect(sm, theme->menu_bg);
-    draw_rect(sm, RGBA(130, 145, 170, 90));
-    sm_field(search_r, g_search, g_search_caret, 1, "Поиск приложений и настроек");
-
-    /* Left column: all applications, flat rows */
-    draw_text_small(left_list.x + 6, left_list.y - 2, "Все приложения", theme->text_muted);
-    y = left_list.y + 18 - g_start_scroll;
-    {
-        Rect saved = gfx_get_clip();
-        gfx_set_clip((Rect){left_list.x, left_list.y + 16, left_list.w, left_list.h - 16});
-        for (i = 0; i < app_count(); i++) {
-            App *a = app_by_index(i);
-            Rect row = {left_list.x, y, left_list.w - 6, 34};
-            if (!a) continue;
-            if (g_search[0] && !strcasestr_ascii(a->name, g_search) && !strcasestr_ascii(a->id, g_search))
-                continue;
-            if (y + 34 >= left_list.y + 16 && y < left_list.y + left_list.h) {
-                if (pt_in(mx, my, row))
-                    fill_rect(row, RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 56));
-                icon_draw(a->icon, row.x + 8, row.y + 5, 24);
-                draw_text_clipped(row.x + 40, row.y + 8, row.w - 90, a->name, theme->text_main);
-                if (!a->installed)
-                    draw_text_small(row.x + row.w - 52, row.y + 10, "Скачать", theme->text_muted);
-            }
-            y += 36;
-        }
-        gfx_set_clip(saved);
-    }
-
-    /* Right column: pinned tiles, flat squares */
-    draw_text_small(right_x, left_list.y - 2, "Закреплённые", theme->text_muted);
-    for (i = 0; i < app_count() && tile_idx < 12; i++) {
-        App *a = app_by_index(i);
-        int tc, tr, tw = (right_w - 16) / 3, th = 76;
-        Rect tile;
-        if (!a || !a->pinned) continue;
-        tc = tile_idx % 3;
-        tr = tile_idx / 3;
-        tile = (Rect){right_x + tc * (tw + 8), left_list.y + 20 + tr * (th + 8), tw, th};
-        if (tile.y + tile.h <= sm.y + sm.h - 58) {
-            int hov = pt_in(mx, my, tile);
-            fill_rect(tile, hov ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 70) : theme->card_bg);
-            draw_rect(tile, hov ? theme->accent : RGBA(130, 145, 170, 52));
-            icon_draw(a->icon, tile.x + (tile.w - 28) / 2, tile.y + 10, 28);
-            {
-                char tlbl[64];
-                fit_utf8_label(a->name, tile.w - 10, tlbl, sizeof(tlbl));
-                draw_text_center_face(FACE_SMALL, tile.x + tile.w / 2, tile.y + 46, tlbl, theme->text_main);
-            }
-        }
-        tile_idx++;
-    }
-
-    /* Footer: user + flat power buttons */
-    hline(sm.x + 14, sm.x + sm.w - 14, sm.y + sm.h - 50, RGBA(130, 145, 170, 58));
-    avatar_draw(sys_profile.avatar_id, sm.x + 20, sm.y + sm.h - 41, 30);
-    draw_text_bold(sm.x + 58, sm.y + sm.h - 40, sys_profile.username, theme->text_main);
-    draw_text_small(sm.x + 58, sm.y + sm.h - 22, edition_name(sys_profile.edition), theme->text_muted);
-    sm_button(pwr_lock, "Блокир.", pt_in(mx, my, pwr_lock), 0);
-    sm_button(pwr_rb, "Перезагр.", pt_in(mx, my, pwr_rb), 0);
-    sm_button(pwr_off, "Выключить", pt_in(mx, my, pwr_off), 1);
-}
 
 static Rect action_rect(void) {
     return (Rect){(int)fb.width - 332, (int)fb.height - wm_taskbar_height() - 298, 322, 290};
@@ -329,20 +200,16 @@ void desktop_draw_overlay(void) {
     int mx = mouse_get_x(), my = mouse_get_y();
     int th = wm_taskbar_height();
     Rect tb = {0, (int)fb.height - th, (int)fb.width, th};
-    Rect start_btn = {6, tb.y + 4, 42, th - 8};
     Rect search_pill = {54, tb.y + 6, 196, th - 12};
     int x, i, hh, mm, ss, dd, mo, yy;
     char tbuf[32], dbuf[32];
-    static const char *pins[] = { "explorer", "browser", "store", "terminal", "settings" };
+    static const char *pins[] = { "explorer", "store", "terminal", "settings" };
 
     /* 1. Translucent Frosted YoroOS Dock / Taskbar */
     fx_blur_rect(tb, 8, theme->task_bg);
     hline(0, (int)fb.width - 1, tb.y, RGBA(255, 255, 255, 36));
 
     /* YoroOS Menu Button (1:1 28x28 supersampled emblem) */
-    if (pt_in(mx, my, start_btn) || g_start_open)
-        fill_round_rect_alpha(start_btn, 8, RGBA(255, 255, 255, 34));
-    icon_draw(ICON_ABOUT, start_btn.x + 7, start_btn.y + 5, 28);
 
     /* Search Pill */
     fill_round_rect_alpha(search_pill, 16, RGBA(255, 255, 255, 24));
@@ -353,7 +220,7 @@ void desktop_draw_overlay(void) {
 
     /* Pinned Quick-Launch Icons (1:1 28x28 supersampled sprites) */
     x = search_pill.x + search_pill.w + 10;
-    for (i = 0; i < 5; i++) {
+    for (i = 0; i < (int)(sizeof(pins) / sizeof(pins[0])); i++) {
         App *a = app_find(pins[i]);
         Rect b = {x, tb.y + 4, 40, th - 8};
         if (!a) continue;
@@ -401,7 +268,6 @@ void desktop_draw_overlay(void) {
         vline((int)fb.width - 5, tb.y + 6, tb.y + th - 6, RGBA(255, 255, 255, 80));
     }
 
-    if (g_start_open) draw_start_menu(mx, my);
     if (g_action_open) draw_action_center(mx, my);
 
     /* Popup Right-Click Context Menu */
@@ -472,89 +338,6 @@ int desktop_event(YoroEvent *e) {
         if (e->type == EV_KEY && e->key == KEY_ESC) { g_ctx.open = 0; wm_invalidate(); return 1; }
     }
 
-    /* 2. Open Start Menu */
-    if (g_start_open) {
-        Rect sm = start_rect();
-        if (e->type == EV_WHEEL && pt_in(e->x, e->y, sm)) {
-            g_start_scroll -= e->wheel * 28;
-            if (g_start_scroll < 0) g_start_scroll = 0;
-            wm_invalidate();
-            return 1;
-        }
-        if (e->type == EV_KEY) {
-            if (e->key == KEY_ESC) { g_start_open = 0; wm_invalidate(); return 1; }
-            if (e->key == KEY_ENTER) {
-                for (i = 0; i < app_count(); i++) {
-                    App *a = app_by_index(i);
-                    if (a && (!g_search[0] || strcasestr_ascii(a->name, g_search) || strcasestr_ascii(a->id, g_search))) {
-                        g_start_open = 0;
-                        if (!a->installed) app_install(a);
-                        app_launch(a);
-                        return 1;
-                    }
-                }
-            }
-            if (ui_textfield_edit(g_search, sizeof(g_search), &g_search_len, &g_search_caret, e)) {
-                wm_invalidate();
-                return 1;
-            }
-            return 1;
-        }
-        if (e->type == EV_MOUSE_DOWN && e->btn == 1) {
-            if (pt_in(e->x, e->y, sm)) {
-                Rect left_list = {sm.x + 16, sm.y + 64, 246, sm.h - 122};
-                int right_x = sm.x + 278, right_w = sm.w - 294, y = left_list.y + 18 - g_start_scroll, tidx = 0;
-
-                /* Power / Lock buttons */
-                if (pt_in(e->x, e->y, (Rect){sm.x + sm.w - 306, sm.y + sm.h - 40, 88, 30})) {
-                    g_start_open = 0; lockscreen_lock(); return 1;
-                }
-                if (pt_in(e->x, e->y, (Rect){sm.x + sm.w - 210, sm.y + sm.h - 40, 96, 30})) {
-                    system_reboot(); return 1;
-                }
-                if (pt_in(e->x, e->y, (Rect){sm.x + sm.w - 106, sm.y + sm.h - 40, 90, 30})) {
-                    system_shutdown(); return 1;
-                }
-                /* App list clicks */
-                for (i = 0; i < app_count(); i++) {
-                    App *a = app_by_index(i);
-                    Rect row = {left_list.x, y, left_list.w - 6, 34};
-                    if (!a) continue;
-                    if (g_search[0] && !strcasestr_ascii(a->name, g_search) && !strcasestr_ascii(a->id, g_search))
-                        continue;
-                    if (pt_in(e->x, e->y, row)) {
-                        g_start_open = 0;
-                        if (!a->installed) app_install(a);
-                        app_launch(a);
-                        return 1;
-                    }
-                    y += 36;
-                }
-                /* Tile clicks */
-                for (i = 0; i < app_count() && tidx < 12; i++) {
-                    App *a = app_by_index(i);
-                    int tc, tr, tw = (right_w - 16) / 3, th2 = 76;
-                    Rect tile;
-                    if (!a || !a->pinned) continue;
-                    tc = tidx % 3; tr = tidx / 3;
-                    tile = (Rect){right_x + tc * (tw + 8), left_list.y + 20 + tr * (th2 + 8), tw, th2};
-                    if (pt_in(e->x, e->y, tile)) {
-                        g_start_open = 0;
-                        if (!a->installed) app_install(a);
-                        app_launch(a);
-                        return 1;
-                    }
-                    tidx++;
-                }
-                return 1;
-            }
-            if (!pt_in(e->x, e->y, (Rect){6, tb.y + 4, 42, th - 8})) {
-                g_start_open = 0;
-                wm_invalidate();
-            }
-        }
-    }
-
     /* 3. Open Action Center */
     if (g_action_open && e->type == EV_MOUSE_DOWN && e->btn == 1) {
         Rect ac = action_rect();
@@ -573,15 +356,10 @@ int desktop_event(YoroEvent *e) {
 
     /* 4. Taskbar Clicks */
     if (e->type == EV_MOUSE_DOWN && pt_in(e->x, e->y, tb)) {
-        static const char *pins[] = { "explorer", "browser", "store", "terminal", "settings" };
+        static const char *pins[] = { "explorer", "store", "terminal", "settings" };
         int x;
-        if (pt_in(e->x, e->y, (Rect){6, tb.y + 4, 42, th - 8}) ||
-            pt_in(e->x, e->y, (Rect){54, tb.y + 6, 196, th - 12})) {
-            startmenu_toggle();
-            return 1;
-        }
         x = 54 + 196 + 10;
-        for (i = 0; i < 5; i++) {
+        for (i = 0; i < (int)(sizeof(pins) / sizeof(pins[0])); i++) {
             Rect b = {x, tb.y + 4, 40, th - 8};
             if (pt_in(e->x, e->y, b)) { app_launch(app_find(pins[i])); return 1; }
             x += 44;
@@ -604,7 +382,6 @@ int desktop_event(YoroEvent *e) {
         }
         if (pt_in(e->x, e->y, (Rect){(int)fb.width - 154, tb.y + 6, 80, th - 12})) {
             g_action_open = !g_action_open;
-            g_start_open = 0;
             wm_invalidate();
             return 1;
         }

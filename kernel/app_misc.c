@@ -840,7 +840,7 @@ static void about_draw(Window *w, Rect r) {
     fill_rect(r, theme->win_bg);
     icon_draw(ICON_ABOUT, r.x + 28, r.y + 24, 56);
     draw_text_title(r.x + 100, r.y + 28, "YoroOS 0.2 «Aurora» (Pre-Release)", theme->text_main);
-    draw_text_small(r.x + 100, r.y + 58, "Сборка 0.2.9610  ·  Гибридное ядро UEFI x86-64 (Gen 2) + BIOS x86 (Gen 1)", theme->accent);
+    draw_text_small(r.x + 100, r.y + 58, "Сборка 0.2.10610  ·  Гибридное ядро UEFI x86-64 (Gen 2) + BIOS x86 (Gen 1)", theme->accent);
     hline(r.x + 24, r.x + r.w - 24, r.y + 96, RGBA(130, 145, 170, 70));
 
     snprintf(b, sizeof(b), "Владелец ПК   : %s (%s)", sys_profile.username, sys_profile.pc_name);

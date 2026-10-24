@@ -22,9 +22,9 @@ typedef uintptr_t uptr;
 
 #define UNUSED(x) (void)(x)
 
-#define YORO_VERSION_STR   "0.2.9"
+#define YORO_VERSION_STR   "0.2.10"
 #define YORO_CODENAME      "Aurora"
-#define YORO_BUILD_STR     "0.2.9.2610"
+#define YORO_BUILD_STR     "0.2.10.2610"
 
 /* ---------------- string / memory ---------------- */
 void  *memset(void *d, int c, size_t n);
@@ -496,8 +496,6 @@ void desktop_draw(void);
 void desktop_draw_overlay(void);
 int  desktop_event(YoroEvent *e);
 void desktop_rebuild(void);
-void startmenu_toggle(void);
-int  startmenu_open(void);
 void lockscreen_lock(void);
 void lockscreen_draw(void);
 void lockscreen_event(YoroEvent *e);
@@ -631,7 +629,6 @@ void installer_init_boot(void);
 void installer_draw_fullscreen(void);
 void installer_event_fullscreen(YoroEvent *e);
 void installer_tick(void);
-void installer_open(void);
 int  installer_running(void);
 
 /* ZIP & Win32/PE64 Executable Subsystem */
