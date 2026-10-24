@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Render the default arrow pointer (Linux Mint / Bibata Modern Classic look).
 
-The geometry is our own: a triangle-style arrow with a concave lower edge, black fill
-and a white outline. Writes:
+The geometry is our own: a triangle-style arrow, black fill and a white outline. Writes:
   src/cursor_data.h     24x24 RGBA bytes, consumed by the kernel
   cursor/preview.png    8x preview on white for review
 
@@ -15,8 +14,8 @@ SIZE = 24          # cursor size in pixels
 SS = 16            # supersampling factor
 OUTLINE = 1.5      # outline width in pixels (outside the black fill)
 
-# Arrow outline in pixel coordinates, tip at (2, 2).
-POLY = [(2.0, 2.0), (2.0, 20.0), (7.0, 19.0), (10.5, 18.5), (13.5, 15.5), (17.0, 11.5)]
+# Arrow outline in pixel coordinates: a plain triangle matching the reference sample.
+POLY = [(2.0, 2.0), (2.0, 20.0), (17.0, 11.5)]
 
 
 def render() -> Image.Image:
