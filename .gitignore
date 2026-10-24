@@ -1,6 +1,3 @@
 build/
-*.o
-*.obj
-*.elf
 __pycache__/
-!release/YoroOS-0.2.10.iso
+image-search/
