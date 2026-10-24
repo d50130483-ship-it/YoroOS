@@ -344,26 +344,42 @@ def icon_vscode() -> Image.Image:
     thick_line(d, (164, 186), (338, 356), 38, w)
     return im
 
+
+ICON_DIR = os.path.join("assets", "icons")
+
+def gen_icon(key: str, fallback) -> Image.Image:
+    """Use the generated artwork assets/icons/<key>.png when present, otherwise the
+    procedural fallback. Artwork is cropped to the same rounded-square tile."""
+    path = os.path.join(ICON_DIR, key + ".png")
+    if not os.path.exists(path):
+        return fallback()
+    src = Image.open(path).convert("RGBA").resize((S, S), Image.Resampling.LANCZOS)
+    mask = Image.new("L", (S, S), 0)
+    ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=112, fill=255)
+    out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    out.paste(src, (0, 0), mask)
+    return out
+
 ICONS = [
-    ("ICON_YORO", icon_yoro()),
-    ("ICON_FILES", icon_files_app()),
-    ("ICON_FOLDER", icon_folder()),
-    ("ICON_TRASH_EMPTY", icon_trash(False)),
-    ("ICON_TRASH_FULL", icon_trash(True)),
-    ("ICON_BROWSER", icon_browser()),
-    ("ICON_STORE", icon_store()),
-    ("ICON_TERMINAL", icon_terminal()),
-    ("ICON_SETTINGS", icon_settings()),
-    ("ICON_INSTALLER", icon_installer()),
-    ("ICON_EXE", icon_exe()),
-    ("ICON_TXT", icon_txt()),
-    ("ICON_ZIP", icon_zip()),
-    ("ICON_MATRONIX", icon_matronix()),
-    ("ICON_CHROME", icon_chrome()),
-    ("ICON_FIREFOX", icon_firefox()),
-    ("ICON_STEAM", icon_steam()),
-    ("ICON_PYTHON", icon_python()),
-    ("ICON_VSCODE", icon_vscode()),
+    ("ICON_YORO", gen_icon("yoro", lambda: icon_yoro())),
+    ("ICON_FILES", gen_icon("files", lambda: icon_files_app())),
+    ("ICON_FOLDER", gen_icon("folder", lambda: icon_folder())),
+    ("ICON_TRASH_EMPTY", gen_icon("trash_empty", lambda: icon_trash(False))),
+    ("ICON_TRASH_FULL", gen_icon("trash_full", lambda: icon_trash(True))),
+    ("ICON_BROWSER", gen_icon("browser", lambda: icon_browser())),
+    ("ICON_STORE", gen_icon("store", lambda: icon_store())),
+    ("ICON_TERMINAL", gen_icon("terminal", lambda: icon_terminal())),
+    ("ICON_SETTINGS", gen_icon("settings", lambda: icon_settings())),
+    ("ICON_INSTALLER", gen_icon("installer", lambda: icon_installer())),
+    ("ICON_EXE", gen_icon("exe", lambda: icon_exe())),
+    ("ICON_TXT", gen_icon("txt", lambda: icon_txt())),
+    ("ICON_ZIP", gen_icon("zip", lambda: icon_zip())),
+    ("ICON_MATRONIX", gen_icon("matronix", lambda: icon_matronix())),
+    ("ICON_CHROME", gen_icon("chrome", lambda: icon_chrome())),
+    ("ICON_FIREFOX", gen_icon("firefox", lambda: icon_firefox())),
+    ("ICON_STEAM", gen_icon("steam", lambda: icon_steam())),
+    ("ICON_PYTHON", gen_icon("python", lambda: icon_python())),
+    ("ICON_VSCODE", gen_icon("vscode", lambda: icon_vscode())),
 ]
 
 # Render a real 1024x768 1:1 visual preview sheet showing desktop icons + dock + all 19 icons!
@@ -403,7 +419,7 @@ for idx, (ic_i, label) in enumerate(desk_items):
 card = Image.new("RGBA", (620, 430), (0, 0, 0, 0))
 cd = ImageDraw.Draw(card)
 cd.rounded_rectangle([0, 0, 619, 429], radius=16, fill=(17, 24, 39, 228), outline=(255, 255, 255, 34), width=1)
-cd.text((22, 16), "YoroOS 0.2.3 — Clean Original Icon Pack (1:1 48px + 24px)", font=font_b, fill=(248, 250, 252, 255))
+cd.text((22, 16), "YoroOS 0.2.4 — Clean Original Icon Pack (1:1 48px + 24px)", font=font_b, fill=(248, 250, 252, 255))
 for i, (nm, im) in enumerate(ICONS):
     c = i % 5
     r = i // 5

@@ -63,18 +63,6 @@ void desktop_rebuild(void) {
     int i, ddir, cnt;
     g_nitems = 0;
 
-    /* 1. Files / Root Storage */
-    g_items[g_nitems].kind = 0;
-    g_items[g_nitems].icon = ICON_COMPUTER;
-    strcpy(g_items[g_nitems].label, "Файлы");
-    g_nitems++;
-
-    /* 2. Trash */
-    g_items[g_nitems].kind = 1;
-    g_items[g_nitems].icon = fs_count(fs_trash_dir()) > 0 ? ICON_TRASH : ICON_TRASH_EMPTY;
-    strcpy(g_items[g_nitems].label, "Корзина");
-    g_nitems++;
-
     /* 3. Installed Desktop App Shortcuts */
     for (i = 0; i < app_count() && g_nitems < MAX_DESK_ITEMS; i++) {
         App *a = app_by_index(i);

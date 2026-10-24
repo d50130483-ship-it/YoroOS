@@ -387,7 +387,7 @@ static void populate_system_tree(void) {
     fs_create_bin(s32, "hello.exe", exe_hello, (int)sizeof(exe_hello));
     fs_create_bin(s32, "sysinfo.exe", exe_sysinfo, (int)sizeof(exe_sysinfo));
     fs_create(s32, "os_version.ini",
-              "[YoroOS]\nVersion=0.2.3\nCodename=Aurora\nArch=UEFI_x86_64_Gen2_and_BIOS_x86\n"
+              "[YoroOS]\nVersion=0.2.4\nCodename=Aurora\nArch=UEFI_x86_64_Gen2_and_BIOS_x86\n"
               "SystemDeleteProtection=DISABLED_BY_DESIGN\n");
     fs_create(boot, "boot.cfg",
               "default=YoroOS-0.2-Aurora\ngpt_esp=FAT16_8142_CLUSTERS\nroot=PARTLABEL=YOROFS2\n");
@@ -407,19 +407,19 @@ void fs_restore_system_files(void) {
 }
 
 void fs_seed(void) {
-    int d_desk, d_dl, d_doc, d_pic;
+    int d_dl, d_doc, d_pic;
     g_sync_suppress++;
     populate_system_tree();
     (void)fs_trash_dir();
 
-    d_desk = fs_desktop_dir();
+    (void)fs_desktop_dir(); /* keep the Desktop folder present, now empty */
     d_dl   = fs_downloads_dir();
     d_doc  = fs_documents_dir();
     d_pic  = fs_pictures_dir();
 
-    fs_create_bin(d_desk, "hello.exe", exe_hello, (int)sizeof(exe_hello));
-    fs_create_bin(d_desk, "Win32_Apps_Pack.zip", zip_win32_pack, (int)sizeof(zip_win32_pack));
-    fs_create(d_desk, "Добро пожаловать в YoroOS 0.2.txt",
+    fs_create_bin(d_dl, "hello.exe", exe_hello, (int)sizeof(exe_hello));
+    fs_create_bin(d_dl, "Win32_Apps_Pack.zip", zip_win32_pack, (int)sizeof(zip_win32_pack));
+    fs_create(d_doc, "Добро пожаловать в YoroOS 0.2.txt",
         "Добро пожаловать в YoroOS 0.2 «Aurora» (Pre-Release)!\n"
         "============================================================\n"
         "Что нового в версии 0.2:\n"

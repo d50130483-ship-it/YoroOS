@@ -1,4 +1,4 @@
-/* YoroOS 0.2.3 - Native 64-bit UEFI & Bare-Metal Hyper-V Generation 2 HAL
+/* YoroOS 0.2.4 - Native 64-bit UEFI & Bare-Metal Hyper-V Generation 2 HAL
  *
  * Dual-mode architecture for universal compatibility:
  *   Mode A — Real Microsoft Hyper-V Generation 2 ("Microsoft Hv"):
@@ -1053,7 +1053,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     if (g_st->ConOut) g_st->ConOut->EnableCursor(g_st->ConOut, 0);
 
     serial_probe();
-    klog("=== YoroOS 0.2.3 x86_64 UEFI / Bare-Metal Hyper-V Gen 2 Kernel ===");
+    klog("=== YoroOS 0.2.4 x86_64 UEFI / Bare-Metal Hyper-V Gen 2 Kernel ===");
     detect_cpu();
 
     /* Connect UEFI controllers on non-Hyper-V or for SimpleFileSystem boot volume */

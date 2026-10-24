@@ -73,7 +73,7 @@ void app_install(App *a) {
     const u8 *exe_bytes;
     if (!a) return;
     a->installed = 1;
-    a->on_desktop = 1;
+    a->on_desktop = 0;
     a->pinned = 1;
 
     /* Create real directory & real Windows PE executable inside C:\Program Files\<App>! */

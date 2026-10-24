@@ -1,4 +1,4 @@
-/* YoroOS 0.2.3 - Authentic Asynchronous Multi-Stage OS Disk Installer
+/* YoroOS 0.2.4 - Authentic Asynchronous Multi-Stage OS Disk Installer
  *
  * Original clean YoroOS UI (ZERO Windows cloning) with real incremental disk writes:
  *   Step 0 — Выбор диска и редакции (real hardware disk inspection + GPT/ESP layout)
@@ -137,7 +137,7 @@ static void draw_wizard_body(Rect r) {
         int nd = hal_disk_count();
         char hw[160];
         icon_draw(ICON_SETUP, r.x + 28, r.y + 64, 40);
-        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.3", theme->text_main);
+        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.4", theme->text_main);
         snprintf(hw, sizeof(hw), "%s  ·  %s  ·  ОЗУ %u МБ",
                  hal_arch_name(), hal_pointer_driver_name(), (u32)hal_ram_mb());
         draw_text_small(r.x + 80, r.y + 90, hw, theme->text_muted);
@@ -304,7 +304,7 @@ static void draw_wizard_body(Rect r) {
 
         icon_draw(ICON_CHECK, r.x + r.w / 2 - 28, r.y + 74, 56);
         draw_text_center_face(FACE_TITLE, r.x + r.w / 2, r.y + 142,
-                              "YoroOS 0.2.3 успешно установлена на жёсткий диск!", theme->text_main);
+                              "YoroOS 0.2.4 успешно установлена на жёсткий диск!", theme->text_main);
         draw_text_center(r.x + r.w / 2, r.y + 178, g_inst.task.detail, theme->text_muted);
         draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 208,
                               "Загрузчик YoroBoot и раздел EFI FAT16 записаны и проверены посекторным чтением.",
@@ -416,7 +416,7 @@ static void handle_wizard_event(Rect r, YoroEvent *e) {
                 if (g_inst.win) { Window *w = g_inst.win; g_inst.win = NULL; wm_close(w); }
                 desktop_rebuild();
                 wm_invalidate();
-                toast("Добро пожаловать в установленную YoroOS 0.2.3!");
+                toast("Добро пожаловать в установленную YoroOS 0.2.4!");
                 return;
             }
             if (g_inst.auto_reboot_on && pt_in(e->x, e->y, (Rect){r.x + 294, r.y + r.h - 56, 200, 40})) {
@@ -532,7 +532,7 @@ static void draw_lang_page(void) {
         draw_round_rect(nx, 2, RGB(120, 120, 160));
         draw_text_center_face(FACE_SMALL, nx.x + nx.w / 2, nx.y + 9, "Далее", RGB(20, 20, 30));
     }
-    draw_text_small(d.x + 24, d.y + d.h - 24, "© YoroOS 0.2.3. Все права защищены.", RGB(176, 176, 210));
+    draw_text_small(d.x + 24, d.y + d.h - 24, "© YoroOS 0.2.4. Все права защищены.", RGB(176, 176, 210));
 }
 
 static void handle_lang_event(YoroEvent *e) {
@@ -577,7 +577,7 @@ void installer_draw_fullscreen(void) {
     draw_shadow(frame, 16);
     fill_round_rect(frame, 10, theme->win_head);
     icon_draw(ICON_SETUP, frame.x + 12, frame.y + 7, 20);
-    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.3 — Мастер установки системы", theme->text_main);
+    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.4 — Мастер установки системы", theme->text_main);
     draw_wizard_body(dlg);
     draw_round_rect(frame, 10, RGBA(148, 163, 184, 75));
 }
