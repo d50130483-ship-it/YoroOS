@@ -1,4 +1,4 @@
-/* YoroOS 0.2.7 - Authentic Asynchronous Multi-Stage OS Disk Installer
+/* YoroOS 0.2.8 - Authentic Asynchronous Multi-Stage OS Disk Installer
  *
  * Original clean YoroOS UI (ZERO Windows cloning) with real incremental disk writes:
  *   Step 0 — Выбор диска и редакции (real hardware disk inspection + GPT/ESP layout)
@@ -7,6 +7,55 @@
  *   Step 3 — Завершение и перезагрузка с жёсткого диска (auto-reboot timer + 1-click reboot)
  */
 #include "kernel.h"
+
+/* Flat, square-cornered controls for the installer (no rounding, no shadows) */
+static void inst_button(Rect r, const char *label, int hover, int primary) {
+    Color bg, fg;
+    int ty = r.y + (r.h - font_line_height(FACE_UI)) / 2;
+    if (primary) {
+        bg = hover ? RGB(37, 99, 235) : theme->accent;
+        fg = C_WHITE;
+    } else {
+        bg = hover ? RGB(226, 232, 240) : RGB(241, 245, 249);
+        fg = RGB(15, 23, 42);
+    }
+    fill_rect(r, bg);
+    draw_rect(r, primary ? bg : RGB(148, 163, 184));
+    draw_text_center(r.x + r.w / 2, ty, label, fg);
+}
+
+static void inst_textfield(Rect r, const char *text, int caret, int focused, const char *placeholder) {
+    int ty = r.y + (r.h - font_line_height(FACE_UI)) / 2;
+    Color bg = theme->dark ? RGB(19, 22, 30) : C_WHITE;
+    fill_rect(r, bg);
+    draw_rect(r, focused ? theme->accent : RGB(148, 163, 184));
+    if (focused)
+        fill_rect((Rect){r.x, r.y + r.h - 2, r.w, 2}, theme->accent);
+    if (text && *text) {
+        draw_text_clipped(r.x + 10, ty, r.w - 20, text, theme->text_main);
+    } else if (placeholder && *placeholder) {
+        draw_text_clipped(r.x + 10, ty, r.w - 20, placeholder, theme->text_muted);
+    }
+    if (focused && caret >= 0 && text) {
+        char sub[256];
+        int n = caret < (int)sizeof(sub) - 1 ? caret : (int)sizeof(sub) - 1;
+        int cx;
+        memcpy(sub, text, (size_t)n);
+        sub[n] = 0;
+        cx = r.x + 10 + text_width(sub);
+        if (cx < r.x + r.w - 8)
+            ui_caret(cx, ty + 1, font_line_height(FACE_UI) - 2, theme->accent);
+    }
+}
+
+static void inst_progress(Rect r, int pct, Color c) {
+    int fw;
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    fill_rect(r, RGB(226, 232, 240));
+    fw = (r.w * pct) / 100;
+    if (fw > 0) fill_rect((Rect){r.x, r.y, fw, r.h}, c);
+}
 
 enum {
     INST_DISKS   = 0,
@@ -127,7 +176,7 @@ static void draw_wizard_body(Rect r) {
         Rect pill = {r.x + 20 + i * sw, r.y + 11, sw - 8, 28};
         int cur = (i == g_inst.step);
         int done = (i < g_inst.step) || (g_inst.step == INST_DONE && i <= 3);
-        fill_round_rect(pill, 14, cur ? theme->accent
+        fill_rect(pill, cur ? theme->accent
                                       : (done ? RGBA(16, 185, 129, 56) : RGBA(148, 163, 184, 24)));
         draw_text_center_face(FACE_SMALL, pill.x + pill.w / 2, pill.y + 6, kSteps[i],
                               cur ? C_WHITE : theme->text_main);
@@ -137,7 +186,7 @@ static void draw_wizard_body(Rect r) {
         int nd = hal_disk_count();
         char hw[160];
         icon_draw(ICON_SETUP, r.x + 28, r.y + 64, 40);
-        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.7", theme->text_main);
+        draw_text_title(r.x + 80, r.y + 62, "Установщик системы YoroOS 0.2.8", theme->text_main);
         snprintf(hw, sizeof(hw), "%s  ·  %s  ·  ОЗУ %u МБ",
                  hal_arch_name(), hal_pointer_driver_name(), (u32)hal_ram_mb());
         draw_text_small(r.x + 80, r.y + 90, hw, theme->text_muted);
@@ -147,8 +196,8 @@ static void draw_wizard_body(Rect r) {
                        theme->text_main);
         {
             Rect box = {r.x + 28, r.y + 148, r.w - 56, 134};
-            fill_round_rect(box, 8, theme->card_bg);
-            draw_round_rect(box, 8, RGBA(148, 163, 184, 65));
+            fill_rect(box, theme->card_bg);
+            draw_rect(box, RGBA(148, 163, 184, 65));
             if (nd <= 0) {
                 draw_text(box.x + 18, box.y + 34, "Жёсткий диск (VHDX / NVMe / SATA) не подключён к виртуальной машине.",
                           theme->text_main);
@@ -164,9 +213,9 @@ static void draw_wizard_body(Rect r) {
                     u64 mb;
                     hal_disk_info(i, &di);
                     mb = (di.sectors * 512ULL) / (1024ULL * 1024ULL);
-                    fill_round_rect(row, 6, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 52)
+                    fill_rect(row, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 52)
                                                 : RGBA(148, 163, 184, 14));
-                    draw_round_rect(row, 6, sel ? theme->accent : RGBA(148, 163, 184, 42));
+                    draw_rect(row, sel ? theme->accent : RGBA(148, 163, 184, 42));
                     icon_draw(ICON_DRIVE, row.x + 12, row.y + 10, 32);
                     draw_text_bold(row.x + 54, row.y + 7, di.model, theme->text_main);
                     snprintf(cap_s, sizeof(cap_s),
@@ -190,23 +239,23 @@ static void draw_wizard_body(Rect r) {
             for (i = 0; i < 4; i++) {
                 Rect c = {r.x + 28 + (i % 2) * (cw + 12), r.y + 322 + (i / 2) * 64, cw, 56};
                 int sel = (g_inst.edition == i);
-                fill_round_rect(c, 8, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 48)
+                fill_rect(c, sel ? RGBA(theme->accent.r, theme->accent.g, theme->accent.b, 48)
                                           : theme->card_bg);
-                draw_round_rect(c, 8, sel ? theme->accent : RGBA(148, 163, 184, 52));
+                draw_rect(c, sel ? theme->accent : RGBA(148, 163, 184, 52));
                 draw_text_bold(c.x + 14, c.y + 8, edition_name(i), theme->text_main);
                 draw_text_small(c.x + 14, c.y + 31, kEdShort[i], theme->text_muted);
             }
         }
 
-        ui_button((Rect){r.x + 28, r.y + r.h - 50, 190, 36},
+        inst_button((Rect){r.x + 28, r.y + r.h - 50, 190, 36},
                   kbd_is_ru() ? "Язык ввода: RU" : "Input: EN",
                   pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 50, 190, 36}), 0);
         if (system_screen_mode == SCREEN_SETUP) {
-            ui_button((Rect){r.x + 230, r.y + r.h - 50, 230, 36},
+            inst_button((Rect){r.x + 230, r.y + r.h - 50, 230, 36},
                       "Live-режим (без записи)",
                       pt_in(mx, my, (Rect){r.x + 230, r.y + r.h - 50, 230, 36}), 0);
         }
-        ui_button((Rect){r.x + r.w - 228, r.y + r.h - 50, 200, 36},
+        inst_button((Rect){r.x + r.w - 228, r.y + r.h - 50, 200, 36},
                   "Далее: Профиль ->",
                   pt_in(mx, my, (Rect){r.x + r.w - 228, r.y + r.h - 50, 200, 36}), 1);
     }
@@ -222,20 +271,20 @@ static void draw_wizard_body(Rect r) {
                         theme->text_muted);
 
         draw_text_small(r.x + 28, r.y + 112, "Имя пользователя:", theme->text_main);
-        ui_textfield(f_user, sys_profile.username, g_inst.user_caret, g_inst.focus_field == 0, "User");
+        inst_textfield(f_user, sys_profile.username, g_inst.user_caret, g_inst.focus_field == 0, "User");
 
         draw_text_small(r.x + 28, r.y + 186, "Имя компьютера:", theme->text_main);
-        ui_textfield(f_pc, sys_profile.pc_name, g_inst.pc_caret, g_inst.focus_field == 1, "YORO-PC");
+        inst_textfield(f_pc, sys_profile.pc_name, g_inst.pc_caret, g_inst.focus_field == 1, "YORO-PC");
 
-        ui_button((Rect){r.x + 28, r.y + 264, 164, 36},
+        inst_button((Rect){r.x + 28, r.y + 264, 164, 36},
                   theme->dark ? "Тема: Тёмная" : "Тема: Светлая",
                   pt_in(mx, my, (Rect){r.x + 28, r.y + 264, 164, 36}), 0);
-        ui_button((Rect){r.x + 204, r.y + 264, 164, 36},
+        inst_button((Rect){r.x + 204, r.y + 264, 164, 36},
                   "Сменить обои",
                   pt_in(mx, my, (Rect){r.x + 204, r.y + 264, 164, 36}), 0);
 
-        fill_round_rect(wp_box, 10, theme->card_bg);
-        draw_round_rect(wp_box, 10, RGBA(148, 163, 184, 70));
+        fill_rect(wp_box, theme->card_bg);
+        draw_rect(wp_box, RGBA(148, 163, 184, 70));
         icon_draw(ICON_ABOUT, wp_box.x + (wp_box.w - 48) / 2, wp_box.y + 28, 48);
         snprintf(winfo, sizeof(winfo), "Обои: %s", wallpaper_name(wallpaper_current()));
         draw_text_center(wp_box.x + wp_box.w / 2, wp_box.y + 94, winfo, theme->text_main);
@@ -244,9 +293,9 @@ static void draw_wizard_body(Rect r) {
         draw_text_center_face(FACE_SMALL, wp_box.x + wp_box.w / 2, wp_box.y + 142,
                               "прямо с виртуального жёсткого диска", theme->text_muted);
 
-        ui_button((Rect){r.x + 28, r.y + r.h - 50, 140, 36}, "<- Назад",
+        inst_button((Rect){r.x + 28, r.y + r.h - 50, 140, 36}, "<- Назад",
                   pt_in(mx, my, (Rect){r.x + 28, r.y + r.h - 50, 140, 36}), 0);
-        ui_button((Rect){r.x + r.w - 268, r.y + r.h - 50, 240, 36},
+        inst_button((Rect){r.x + r.w - 268, r.y + r.h - 50, 240, 36},
                   "Начать установку на диск",
                   pt_in(mx, my, (Rect){r.x + r.w - 268, r.y + r.h - 50, 240, 36}), 1);
     }
@@ -269,7 +318,7 @@ static void draw_wizard_body(Rect r) {
                   g_inst.task.failed ? RGB(239, 68, 68) : theme->text_main);
         draw_text_small(r.x + 36, r.y + 124, g_inst.task.detail, theme->text_muted);
 
-        ui_progress(pbar, g_inst.task.pct, g_inst.task.failed ? RGB(239, 68, 68) : theme->accent);
+        inst_progress(pbar, g_inst.task.pct, g_inst.task.failed ? RGB(239, 68, 68) : theme->accent);
         snprintf(pct_s, sizeof(pct_s), "Выполнено: %d%%  ·  Записано на носитель: %u.%u МБ",
                  g_inst.task.pct,
                  (u32)(g_inst.task.bytes_written / (1024ULL * 1024ULL)),
@@ -283,7 +332,7 @@ static void draw_wizard_body(Rect r) {
             int cur  = (!g_inst.task.done && !g_inst.task.failed && g_inst.task.phase == pnum);
             int yy = r.y + 214 + i * 36;
             Rect badge = {r.x + 36, yy, 24, 24};
-            fill_round_rect(badge, 12, done ? RGB(16, 185, 129)
+            fill_rect(badge, done ? RGB(16, 185, 129)
                                             : (cur ? theme->accent : RGBA(148, 163, 184, 38)));
             draw_text_center_face(FACE_SMALL, badge.x + 12, badge.y + 4,
                                   done ? "+" : (cur ? ">" : "."), C_WHITE);
@@ -292,7 +341,7 @@ static void draw_wizard_body(Rect r) {
         }
 
         if (g_inst.task.failed) {
-            ui_button((Rect){r.x + 36, r.y + r.h - 50, 160, 36}, "<- Назад",
+            inst_button((Rect){r.x + 36, r.y + r.h - 50, 160, 36}, "<- Назад",
                       pt_in(mx, my, (Rect){r.x + 36, r.y + r.h - 50, 160, 36}), 0);
         }
     }
@@ -304,7 +353,7 @@ static void draw_wizard_body(Rect r) {
 
         icon_draw(ICON_CHECK, r.x + r.w / 2 - 28, r.y + 74, 56);
         draw_text_center_face(FACE_TITLE, r.x + r.w / 2, r.y + 142,
-                              "YoroOS 0.2.7 успешно установлена на жёсткий диск!", theme->text_main);
+                              "YoroOS 0.2.8 успешно установлена на жёсткий диск!", theme->text_main);
         draw_text_center(r.x + r.w / 2, r.y + 178, g_inst.task.detail, theme->text_muted);
         draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 208,
                               "Загрузчик YoroBoot и раздел EFI FAT16 записаны и проверены посекторным чтением.",
@@ -315,19 +364,19 @@ static void draw_wizard_body(Rect r) {
 
         if (g_inst.auto_reboot_on) {
             snprintf(rb_msg, sizeof(rb_msg), "Автоматическая перезагрузка в установленную систему через %d с...", rem_sec);
-            ui_progress((Rect){r.x + 160, r.y + 272, r.w - 320, 14}, (int)((elapsed * 100U) / 600U), theme->accent);
+            inst_progress((Rect){r.x + 160, r.y + 272, r.w - 320, 14}, (int)((elapsed * 100U) / 600U), theme->accent);
             draw_text_center_face(FACE_SMALL, r.x + r.w / 2, r.y + 296, rb_msg, theme->accent);
         }
 
-        ui_button((Rect){r.x + 60, r.y + r.h - 56, 220, 40},
+        inst_button((Rect){r.x + 60, r.y + r.h - 56, 220, 40},
                   "Открыть Рабочий стол",
                   pt_in(mx, my, (Rect){r.x + 60, r.y + r.h - 56, 220, 40}), 0);
         if (g_inst.auto_reboot_on) {
-            ui_button((Rect){r.x + 294, r.y + r.h - 56, 200, 40},
+            inst_button((Rect){r.x + 294, r.y + r.h - 56, 200, 40},
                       "Остановить таймер",
                       pt_in(mx, my, (Rect){r.x + 294, r.y + r.h - 56, 200, 40}), 0);
         }
-        ui_button((Rect){r.x + r.w - 280, r.y + r.h - 56, 220, 40},
+        inst_button((Rect){r.x + r.w - 280, r.y + r.h - 56, 220, 40},
                   "Перезагрузить сейчас",
                   pt_in(mx, my, (Rect){r.x + r.w - 280, r.y + r.h - 56, 220, 40}), 1);
     }
@@ -416,7 +465,7 @@ static void handle_wizard_event(Rect r, YoroEvent *e) {
                 if (g_inst.win) { Window *w = g_inst.win; g_inst.win = NULL; wm_close(w); }
                 desktop_rebuild();
                 wm_invalidate();
-                toast("Добро пожаловать в установленную YoroOS 0.2.7!");
+                toast("Добро пожаловать в установленную YoroOS 0.2.8!");
                 return;
             }
             if (g_inst.auto_reboot_on && pt_in(e->x, e->y, (Rect){r.x + 294, r.y + r.h - 56, 200, 40})) {
@@ -480,14 +529,14 @@ static void draw_lang_page(void) {
     int i, k;
 
     fill_rect((Rect){0, 0, (int)fb.width, (int)fb.height}, RGB(28, 10, 92));
-    draw_shadow(d, 14);
+    /* flat layout: no shadow */ (void)0;
     fill_rect(d, RGB(34, 14, 104));
     fill_rect(bar, RGB(22, 8, 74));
     icon_draw(ICON_SETUP, d.x + 10, d.y + 6, 20);
     draw_text_small(d.x + 38, d.y + 9, "Установка YoroOS", C_WHITE);
 
     /* Оригинальный знак: скруглённый квадрат с буквой Y и название */
-    fill_round_rect(mark, 10, C_ACCENT);
+    fill_rect(mark, C_ACCENT);
     draw_text_center_face(FACE_TITLE, mark.x + mark.w / 2, mark.y + 8, "Y", C_WHITE);
     draw_text_hero(mark.x + mark.w + 14, mark.y + 4, "YoroOS", C_WHITE);
 
@@ -522,17 +571,17 @@ static void draw_lang_page(void) {
             draw_text(it.x + 8, it.y + 6, lang_option_text(row, i),
                       sel ? C_WHITE : RGB(20, 20, 30));
         }
-        draw_round_rect((Rect){cb.x, cb.y + cb.h, cb.w, cb.h * n}, 0, RGB(120, 120, 160));
+        draw_rect((Rect){cb.x, cb.y + cb.h, cb.w, cb.h * n}, RGB(120, 120, 160));
     }
 
     /* Кнопка «Далее» и подпись */
     {
         int hov = pt_in(mx, my, nx);
         fill_rect(nx, hov ? RGB(222, 222, 236) : RGB(244, 244, 250));
-        draw_round_rect(nx, 2, RGB(120, 120, 160));
+        draw_rect(nx, RGB(120, 120, 160));
         draw_text_center_face(FACE_SMALL, nx.x + nx.w / 2, nx.y + 9, "Далее", RGB(20, 20, 30));
     }
-    draw_text_small(d.x + 24, d.y + d.h - 24, "© YoroOS 0.2.7. Все права защищены.", RGB(176, 176, 210));
+    draw_text_small(d.x + 24, d.y + d.h - 24, "© YoroOS 0.2.8. Все права защищены.", RGB(176, 176, 210));
 }
 
 static void handle_lang_event(YoroEvent *e) {
@@ -574,12 +623,12 @@ void installer_draw_fullscreen(void) {
     frame = (Rect){dlg.x, dlg.y - 34, dlg.w, dlg.h + 34};
 
     theme_draw_wallpaper();
-    draw_shadow(frame, 16);
-    fill_round_rect(frame, 10, theme->win_head);
+    /* flat layout: no shadow */ (void)0;
+    fill_rect(frame, theme->win_head);
     icon_draw(ICON_SETUP, frame.x + 12, frame.y + 7, 20);
-    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.7 — Мастер установки системы", theme->text_main);
+    draw_text_small(frame.x + 38, frame.y + 9, "YoroOS 0.2.8 — Мастер установки системы", theme->text_main);
     draw_wizard_body(dlg);
-    draw_round_rect(frame, 10, RGBA(148, 163, 184, 75));
+    draw_rect(frame, RGBA(148, 163, 184, 75));
 }
 
 void installer_event_fullscreen(YoroEvent *e) {

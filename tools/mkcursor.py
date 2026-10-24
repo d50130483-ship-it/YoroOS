@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Generates kernel/cursor_data.h: the YoroOS arrow pointer.
 
-Style: solid black arrow with a white rounded outline (the look of the default
-Linux Mint pointer), drawn here from geometry. Every pixel stores two anti-aliased
+Style: solid black arrow with a white rounded outline (triangle pointer, user reference), drawn here from geometry. Every pixel stores two anti-aliased
 coverages: outline (white) and fill (black), so the kernel can alpha-blend it.
 No third-party cursor artwork is used.
 """
@@ -13,9 +12,8 @@ OX, OY = 1.0, 1.0            # shift the arrow inside the 24x24 box
 SS = 8                       # supersampling per axis
 OUTLINE = 1.45               # white outline thickness (pixels, outside the black shape)
 
-# Arrow polygon (tip at the origin, classic pointer with a tail notch)
-POLY = [(0.0, 0.0), (0.0, 16.2), (4.3, 12.5), (7.1, 18.9),
-        (9.7, 17.7), (6.9, 11.8), (12.4, 11.8)]
+# Pointer polygon: tip at the origin
+POLY = [(0.0, 0.0), (0.0, 17.0), (12.6, 12.6)]   # plain triangle, no tail (user reference)
 
 def inside(px, py):
     c = False
