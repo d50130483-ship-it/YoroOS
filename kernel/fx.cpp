@@ -1,4 +1,4 @@
-/* YoroOS 0.2.5 - QOI Minimalist Wallpaper Decoder, Frosted Compositor & Crisp Cursor
+/* YoroOS 0.2.6 - QOI Minimalist Wallpaper Decoder, Frosted Compositor & Crisp Cursor
  *
  * Renders the 3 real generated minimalist wallpapers embedded in kernel/assets_data.c
  * via lossless QOI decode + smooth 16.16 fixed-point bilinear upscaling + anti-banding dither,

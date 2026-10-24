@@ -1,4 +1,4 @@
-/* YoroOS 0.2.5 - Pure-C GPT + Canonical FAT16 UEFI ESP + Hybrid BIOS + YoroFS2 Installer
+/* YoroOS 0.2.6 - Pure-C GPT + Canonical FAT16 UEFI ESP + Hybrid BIOS + YoroFS2 Installer
  *
  * Self-contained disk layout (all offsets in 512-byte logical LBAs):
  *   LBA 0             : Hybrid Protective/Boot MBR (boot.bin + 0xEE GPT Protective Entry)
@@ -125,7 +125,7 @@ static u8 *build_canonical_fat16_esp(const u8 *efi_pe, u32 efi_len) {
     static const char kTagText[] =
         "YOROOS_INSTALLED_DISK=1\r\n"
         "LOADER=\\EFI\\BOOT\\BOOTX64.EFI\r\n"
-        "VERSION=0.2.5\r\n";
+        "VERSION=0.2.6\r\n";
     u8 *img = (u8 *)kzalloc((size_t)ESP_SECTORS * 512U);
     u8 *root;
     u32 next_clus = 2U;

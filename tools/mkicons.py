@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
-"""Builds the 19 desktop/store icons in assets/icons/<key>.png (512x512 RGBA, transparent background).
+"""Builds every icon image YoroOS uses. Nothing is drawn in code at run time.
 
-Sources:
-  assets/icons/src/<key>.png   - generated artwork (flat illustrations on a coloured tile);
-                                  the tile background is removed here.
-  assets/icons/vector/<key>.svg - open-licence vector icons (see assets/icons/NOTICE.md),
-                                  rendered with resvg with the colour set below.
-  assets/icons/matronix_logo.png - logo from the Matronix Browser repository (opaque corners
-                                  are cleared the same way as generated artwork).
+Outputs
+  assets/icons/<key>.png          19 app / desktop icons, 512x512 RGBA, transparent background
+  assets/icons/glyphs/<key>.png   19 UI glyphs (search, wifi, check, ...), 512x512 RGBA, white
+
+Sources
+  assets/icons/src/<key>.png      generated artwork; the tile background is removed here
+  assets/icons/vector/*.svg       open-licence vector icons (see assets/icons/NOTICE.md)
+  assets/icons/matronix_logo.png  logo from the Matronix Browser repository
 
 Run:  python3 tools/mkicons.py
 """
@@ -19,24 +20,52 @@ from PIL import Image
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 ICON_DIR = os.path.join(ROOT, "assets", "icons")
+GLYPH_DIR = os.path.join(ICON_DIR, "glyphs")
+VECTOR_DIR = os.path.join(ICON_DIR, "vector")
 SIZE = 512
 TOL = 18  # max colour step between neighbouring pixels while flooding the background
 TOL_OVERRIDE = {"trash_full": 8, "settings": 8}  # low-contrast artwork needs a tighter fill
 
-# key -> (vector file, colour)
+# key -> (vector file, colour) for app icons
 VECTOR = {
-    "chrome":  ("chrome.svg",  "#4285F4"),
-    "firefox": ("firefox.svg", "#FF7139"),
-    "steam":   ("steam.svg",   "#E2E8F0"),
-    "python":  ("python.svg",  "#3776AB"),
-    "vscode":  ("vscode.svg",  "#0078D4"),
-    "exe":     ("exe.svg",     "#7C3AED"),
-    "txt":     ("txt.svg",     "#94A3B8"),
-    "zip":     ("zip.svg",     "#F59E0B"),
+    "chrome":      ("chrome.svg",      "#4285F4"),
+    "firefox":     ("firefox.svg",     "#FF7139"),
+    "steam":       ("steam.svg",       "#E2E8F0"),
+    "python":      ("python.svg",      "#3776AB"),
+    "vscode":      ("vscode.svg",      "#0078D4"),
+    "exe":         ("exe.svg",         "#7C3AED"),
+    "txt":         ("txt.svg",         "#94A3B8"),
+    "zip":         ("zip.svg",         "#F59E0B"),
     "trash_empty": ("trash_empty.svg", "#94A3B8"),
 }
 GENERATED = ["yoro", "files", "folder", "trash_full",
              "browser", "store", "terminal", "settings", "installer"]
+
+# UI glyph -> Lucide icon name (ISC). Rendered white so they read on the dark taskbar,
+# accent buttons and tiles.
+GLYPH_COLOUR = "#F8FAFC"
+GLYPHS = {
+    "calc":       "calculator",
+    "image":      "image",
+    "paint":      "palette",
+    "git":        "git-branch",
+    "vlc":        "play",
+    "discord":    "message-circle",
+    "taskmgr":    "activity",
+    "regedit":    "database",
+    "power":      "power",
+    "search":     "search",
+    "wifi":       "wifi",
+    "volume":     "volume-2",
+    "bell":       "bell",
+    "up":         "chevron-up",
+    "back":       "chevron-left",
+    "plus":       "plus",
+    "download":   "download",
+    "arrow_down": "arrow-down",
+    "check":      "check",
+}
+LUCIDE_DIR = os.environ.get("LUCIDE_DIR", "/tmp/npmget/package/icons")
 
 
 def step_ok(a, b, tol):
@@ -45,12 +74,11 @@ def step_ok(a, b, tol):
 
 def remove_background(img: Image.Image, tol: int = TOL) -> Image.Image:
     """Flood-fills from the image border; a pixel joins the background when it is
-    within TOL of the pixel it was reached from. Smooth gradients are followed,
+    within tol of the pixel it was reached from. Smooth gradients are followed,
     while the symbol's edges (higher contrast) stop the fill."""
     img = img.convert("RGBA")
     w, h = img.size
-    rgb = img.convert("RGB")
-    px = rgb.load()
+    px = img.convert("RGB").load()
     alpha = bytearray(b"\xff") * (w * h)
     seen = bytearray(w * h)
     q = deque()
@@ -81,39 +109,38 @@ def remove_background(img: Image.Image, tol: int = TOL) -> Image.Image:
     return out
 
 
-def render_vector(path: str, colour: str, key: str) -> Image.Image:
+def render_svg(svg_path: str, colour: str, out_path: str) -> None:
     import resvg_py
-    with open(path, encoding="utf-8") as fh:
+    with open(svg_path, encoding="utf-8") as fh:
         svg = fh.read()
-    # Icon sets use either no fill (Simple Icons), currentColor (Lucide, Codicons) or
-    # stroke="currentColor" (Lucide). Set the colour explicitly and thin Lucide strokes.
     svg = svg.replace("currentColor", colour)
-    if "<path " in svg and 'fill="' not in svg.split("<path ", 1)[1].split(">", 1)[0]:
-        svg = svg.replace("<path ", '<path fill="%s" ' % colour, 1)
+    # Simple Icons / Codicons come without a fill or stroke on the root: fill them.
+    # Lucide sets fill="none" and strokes, so it keeps its outline style.
+    if 'fill="none"' not in svg and 'stroke=' not in svg and "<path " in svg:
+        head, tail = svg.split("<path ", 1)
+        tag = tail.split(">", 1)[0]
+        if "fill=" not in tag and "fill=" not in head:
+            svg = head + '<path fill="%s" ' % colour + tail
     svg = svg.replace('stroke-width="2"', 'stroke-width="1.6"')
     data = resvg_py.svg_to_bytes(svg_string=svg, width=SIZE, height=SIZE)
-    tmp = os.path.join(ICON_DIR, "vector", key + ".rendered.png")
-    with open(tmp, "wb") as fh:
+    with open(out_path, "wb") as fh:
         fh.write(bytes(data))
-    img = Image.open(tmp).convert("RGBA")
-    os.remove(tmp)
-    return img
 
 
 def main() -> int:
     os.makedirs(ICON_DIR, exist_ok=True)
+    os.makedirs(GLYPH_DIR, exist_ok=True)
     done = []
 
     for key in GENERATED:
         src = os.path.join(ICON_DIR, "src", key + ".png")
         img = Image.open(src).convert("RGBA").resize((SIZE, SIZE), Image.Resampling.LANCZOS)
-        out = remove_background(img, TOL_OVERRIDE.get(key, TOL))
-        out.save(os.path.join(ICON_DIR, key + ".png"))
+        remove_background(img, TOL_OVERRIDE.get(key, TOL)).save(os.path.join(ICON_DIR, key + ".png"))
         done.append(key)
 
     for key, (fname, colour) in VECTOR.items():
-        img = render_vector(os.path.join(ICON_DIR, "vector", fname), colour, key)
-        img.save(os.path.join(ICON_DIR, key + ".png"))
+        tmp = os.path.join(ICON_DIR, key + ".png")
+        render_svg(os.path.join(VECTOR_DIR, fname), colour, tmp)
         done.append(key)
 
     mx = Image.open(os.path.join(ICON_DIR, "matronix_logo.png")).convert("RGBA").resize((SIZE, SIZE), Image.Resampling.LANCZOS)
@@ -122,7 +149,14 @@ def main() -> int:
     mx.save(os.path.join(ICON_DIR, "matronix.png"))
     done.append("matronix")
 
-    print("icons written:", len(done), sorted(done))
+    glyph_done = []
+    for key, lucide in GLYPHS.items():
+        svg_src = os.path.join(LUCIDE_DIR, lucide + ".svg")
+        out = os.path.join(GLYPH_DIR, key + ".png")
+        render_svg(svg_src, GLYPH_COLOUR, out)
+        glyph_done.append(key)
+
+    print("icons written:", len(done), "glyphs written:", len(glyph_done))
     return 0
 
 

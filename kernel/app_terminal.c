@@ -99,7 +99,7 @@ static void term_exec(Window *w, TermState *st, const char *raw_line) {
         toutf(st, "%s\n", cwdp);
     }
     else if (!strcasecmp(line, "ver") || !strcasecmp(line, "uname")) {
-        toutf(st, "YoroOS [Version 0.2.5610 «Aurora» — %s]\n", hal_arch_name());
+        toutf(st, "YoroOS [Version 0.2.6610 «Aurora» — %s]\n", hal_arch_name());
     }
     else if (!strcasecmp(line, "systeminfo") || !strcasecmp(line, "neofetch")) {
         toutf(st,
