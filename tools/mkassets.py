@@ -354,6 +354,8 @@ def gen_icon(key: str, fallback) -> Image.Image:
     if not os.path.exists(path):
         return fallback()
     src = Image.open(path).convert("RGBA").resize((S, S), Image.Resampling.LANCZOS)
+    if src.getchannel("A").getextrema()[0] < 255:
+        return src  # already a transparent cut-out (tools/mkicons.py)
     mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(mask).rounded_rectangle([0, 0, S - 1, S - 1], radius=112, fill=255)
     out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
@@ -419,7 +421,7 @@ for idx, (ic_i, label) in enumerate(desk_items):
 card = Image.new("RGBA", (620, 430), (0, 0, 0, 0))
 cd = ImageDraw.Draw(card)
 cd.rounded_rectangle([0, 0, 619, 429], radius=16, fill=(17, 24, 39, 228), outline=(255, 255, 255, 34), width=1)
-cd.text((22, 16), "YoroOS 0.2.4 — Clean Original Icon Pack (1:1 48px + 24px)", font=font_b, fill=(248, 250, 252, 255))
+cd.text((22, 16), "YoroOS 0.2.5 — Clean Original Icon Pack (1:1 48px + 24px)", font=font_b, fill=(248, 250, 252, 255))
 for i, (nm, im) in enumerate(ICONS):
     c = i % 5
     r = i // 5

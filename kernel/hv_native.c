@@ -1,4 +1,4 @@
-/* YoroOS 0.2.4 - Native Bare-Metal Microsoft Hyper-V Generation 2 Driver Stack
+/* YoroOS 0.2.5 - Native Bare-Metal Microsoft Hyper-V Generation 2 Driver Stack
  *
  * Verified byte-for-byte against mainline Linux 6.x:
  *   include/hyperv/hvgdk_mini.h, hvhdk_mini.h, include/linux/hyperv.h,

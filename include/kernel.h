@@ -22,9 +22,9 @@ typedef uintptr_t uptr;
 
 #define UNUSED(x) (void)(x)
 
-#define YORO_VERSION_STR   "0.2.4"
+#define YORO_VERSION_STR   "0.2.5"
 #define YORO_CODENAME      "Aurora"
-#define YORO_BUILD_STR     "0.2.4.2610"
+#define YORO_BUILD_STR     "0.2.5.2610"
 
 /* ---------------- string / memory ---------------- */
 void  *memset(void *d, int c, size_t n);

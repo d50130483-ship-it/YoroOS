@@ -3,4 +3,4 @@ build/
 *.obj
 *.elf
 __pycache__/
-!release/YoroOS-0.2.4.iso
+!release/YoroOS-0.2.5.iso
