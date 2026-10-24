@@ -1,16 +1,22 @@
-/* YoroOS kernel, step 1: white screen with the default pointer.
+/* YoroOS kernel: white screen with the default pointer.
  *
  * Runs as a UEFI application (Hyper-V Gen 2 or any UEFI machine). It takes the
  * Graphics Output Protocol framebuffer, paints the background white and draws
- * the pointer at the centre of the screen. Input and the rest of the system come
- * in later steps.
+ * the pointer. On Hyper-V the pointer follows the synthetic mouse (hv_mouse.c);
+ * elsewhere it stays in the centre of the screen.
  */
 #include "efi.h"
 #include "cursor_data.h"
+#include "hv_mouse.h"
 
 #define BG_R 255
 #define BG_G 255
 #define BG_B 255
+
+#define ALLOCATE_ANY_PAGES 0
+#define LOADER_CODE        1      /* executable memory: the hypercall page lives here */
+#define POLL_INTERVAL_US   10000  /* pointer poll period on Hyper-V */
+#define IDLE_INTERVAL_US   100000 /* period when there is no mouse */
 
 static const EFI_GUID GOP_GUID = {
     0x9042a9de, 0x23dc, 0x4a38, {0x96, 0xfb, 0x7a, 0xde, 0xd0, 0x80, 0x51, 0x6a}
@@ -18,6 +24,7 @@ static const EFI_GUID GOP_GUID = {
 
 typedef EFI_STATUS (*locate_protocol_fn)(const EFI_GUID *, void *, void **);
 typedef EFI_STATUS (*stall_fn)(u64 microseconds);
+typedef EFI_STATUS (*allocate_pages_fn)(u32 type, u32 memory_type, u64 pages, u64 *address);
 
 static EFI_BOOT_SERVICES *g_bs;
 
@@ -32,6 +39,15 @@ static void paint_background(u32 *fb, u32 pitch, u32 w, u32 h, u32 format) {
     for (u32 y = 0; y < h; y++) {
         u32 *row = fb + (u64)y * pitch;
         for (u32 x = 0; x < w; x++) row[x] = color;
+    }
+}
+
+/* Fills a rectangle with the background colour, clipped to the screen. */
+static void paint_rect_bg(u32 *fb, u32 pitch, u32 w, u32 h, u32 format, u32 x0, u32 y0, u32 rw, u32 rh) {
+    u32 color = pack_rgb(format, BG_R, BG_G, BG_B);
+    for (u32 y = y0; y < y0 + rh && y < h; y++) {
+        u32 *row = fb + (u64)y * pitch;
+        for (u32 x = x0; x < x0 + rw && x < w; x++) row[x] = color;
     }
 }
 
@@ -60,6 +76,13 @@ static void draw_cursor(u32 *fb, u32 pitch, u32 w, u32 h, u32 format, u32 x0, u3
     }
 }
 
+/* Erases the pointer at its old place, then draws it at the new one. */
+static void move_cursor(u32 *fb, u32 pitch, u32 w, u32 h, u32 format,
+                        u32 old_x, u32 old_y, u32 x0, u32 y0) {
+    paint_rect_bg(fb, pitch, w, h, format, old_x, old_y, CURSOR_W, CURSOR_H);
+    draw_cursor(fb, pitch, w, h, format, x0, y0);
+}
+
 EFI_STATUS EfiMain(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     (void)image;
     g_bs = st->BootServices;
@@ -79,9 +102,37 @@ EFI_STATUS EfiMain(EFI_HANDLE image, EFI_SYSTEM_TABLE *st) {
     u32 *fb = (u32 *)(u64)mode->FrameBufferBase;
 
     paint_background(fb, pitch, w, h, format);
-    draw_cursor(fb, pitch, w, h, format, (w - CURSOR_W) / 2, (h - CURSOR_H) / 2);
 
-    /* Keep the picture up. Stall keeps the loop from spinning at full speed. */
-    for (;;) ((stall_fn)g_bs->Stall)(100000);
+    /* On Hyper-V start the synthetic mouse; anywhere else the pointer stays centred. */
+    int mouse = 0;
+    if (hvm_detect()) {
+        u64 pool = 0;
+        EFI_STATUS st_pool = ((allocate_pages_fn)g_bs->AllocatePages)(
+            ALLOCATE_ANY_PAGES, LOADER_CODE, HVM_POOL_PAGES, &pool);
+        if (st_pool == 0 && pool != 0)
+            mouse = hvm_init((u8 *)(u64)pool, (u64)HVM_POOL_PAGES * 4096ULL) == 0;
+    }
+
+    u32 cur_x = (w - CURSOR_W) / 2;
+    u32 cur_y = (h - CURSOR_H) / 2;
+    draw_cursor(fb, pitch, w, h, format, cur_x, cur_y);
+
+    /* Keep the picture up and follow the mouse. Stall keeps the loop from spinning. */
+    for (;;) {
+        if (mouse && hvm_poll()) {
+            u32 rx, ry, mx, my, buttons;
+            hvm_pointer(&rx, &ry, &mx, &my, &buttons);
+            u32 nx = mx ? (u32)(((u64)rx * (w - 1)) / mx) : 0;
+            u32 ny = my ? (u32)(((u64)ry * (h - 1)) / my) : 0;
+            if (nx > w - CURSOR_W) nx = w - CURSOR_W;
+            if (ny > h - CURSOR_H) ny = h - CURSOR_H;
+            if (nx != cur_x || ny != cur_y) {
+                move_cursor(fb, pitch, w, h, format, cur_x, cur_y, nx, ny);
+                cur_x = nx;
+                cur_y = ny;
+            }
+        }
+        ((stall_fn)g_bs->Stall)(mouse ? POLL_INTERVAL_US : IDLE_INTERVAL_US);
+    }
     return 0;
 }
