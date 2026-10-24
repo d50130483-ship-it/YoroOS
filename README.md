@@ -25,6 +25,6 @@ Requirements: Python 3 with `ziglang`, `Pillow`, `unicorn`, `pefile`.
 
 - `src/` — kernel sources (`main.c`, `efi.h`, generated `cursor_data.h`).
 - `tools/mkcursor.py` — renders the pointer into `src/cursor_data.h`.
-- `tools/mkiso.py` — writes a UEFI-only ISO with an embedded FAT12 EFI System Partition.
+- `tools/mkiso.py` — writes a UEFI-only ISO with an embedded FAT16 EFI System Partition.
 - `tools/render_test.py` — boots the kernel in a small UEFI emulator and checks the frame.
 - `cursor/preview.png` — the pointer at 8x for review.

@@ -2,7 +2,9 @@
 """Build a UEFI-bootable ISO 9660 image for YoroOS.
 
 Layout:
-  * An embedded FAT12 EFI System Partition (4 MiB) holding EFI/BOOT/BOOTX64.EFI.
+  * An embedded FAT16 EFI System Partition (4 MiB) holding EFI/BOOT/BOOTX64.EFI.
+    With ~8100 clusters the volume is FAT16 by the Microsoft FAT rules; firmware decides
+    the FAT type from the cluster count, so the table must be 16-bit.
   * ISO 9660 with an El Torito boot catalog. The UEFI entry (platform 0xEF) points at
     the ESP image. There is no legacy BIOS entry.
   * The ISO also carries EFIBOOT.IMG and EFI/BOOT/BOOTX64.EFI as plain files.
@@ -18,7 +20,7 @@ ESP_BYTES = 4 * 1024 * 1024
 VOLUME_ID = "YOROOS"
 
 
-# ---------------------------------------------------------------- FAT12 ESP
+# ---------------------------------------------------------------- FAT16 ESP
 
 def build_esp(efi: bytes) -> bytes:
     total_sec = ESP_BYTES // 512
@@ -27,11 +29,11 @@ def build_esp(efi: bytes) -> bytes:
     root_entries = 224
     root_sec = root_entries * 32 // 512
 
-    # Find the smallest FAT size that addresses every data cluster.
+    # Find the smallest FAT size that addresses every data cluster (16-bit entries).
     fat_sec = 1
     while True:
         clusters = total_sec - reserved - num_fats * fat_sec - root_sec
-        if (clusters + 2) * 3 <= fat_sec * 512 * 2:
+        if (clusters + 2) * 2 <= fat_sec * 512:
             break
         fat_sec += 1
 
@@ -43,18 +45,12 @@ def build_esp(efi: bytes) -> bytes:
         return data_start + (cluster - 2)
 
     def set_fat(n: int, value: int) -> None:
-        off = n + n // 2
-        if n % 2 == 0:
-            fat[off] = value & 0xFF
-            fat[off + 1] = (fat[off + 1] & 0xF0) | ((value >> 8) & 0x0F)
-        else:
-            fat[off] = (fat[off] & 0x0F) | ((value & 0x0F) << 4)
-            fat[off + 1] = (value >> 4) & 0xFF
+        struct.pack_into("<H", fat, n * 2, value)
 
     def write_chain(start: int, nclusters: int) -> None:
         for i in range(nclusters):
             n = start + i
-            set_fat(n, 0xFFF if i == nclusters - 1 else n + 1)
+            set_fat(n, 0xFFFF if i == nclusters - 1 else n + 1)
 
     def dirent(name11: bytes, attr: int, cluster: int, size: int) -> bytes:
         e = bytearray(32)
@@ -71,10 +67,10 @@ def build_esp(efi: bytes) -> bytes:
     # Cluster 2: EFI directory, cluster 3: BOOT directory, clusters 4..: BOOTX64.EFI.
     efi_cluster = 4
     efi_clusters = (len(efi) + 511) // 512
-    set_fat(0, 0xFF8)
-    set_fat(1, 0xFFF)
-    set_fat(2, 0xFFF)
-    set_fat(3, 0xFFF)
+    set_fat(0, 0xFFF8)
+    set_fat(1, 0xFFFF)
+    set_fat(2, 0xFFFF)
+    set_fat(3, 0xFFFF)
     write_chain(efi_cluster, efi_clusters)
 
     # "." of a subdirectory points at itself. ".." of a first-level subdir points at 0 (root).
@@ -127,7 +123,7 @@ def boot_sector(total_sec: int, fat_sec: int, root_entries: int) -> bytes:
     b[38] = 0x29                                # extended boot signature
     struct.pack_into("<I", b, 39, 0x59524F53)   # volume serial
     b[43:54] = b"YOROESP    "
-    b[54:62] = b"FAT12   "
+    b[54:62] = b"FAT16   "
     b[62:65] = b"\xF4\xEB\xFD"                  # hlt; jmp $-1 (never executed under UEFI)
     b[510:512] = b"\x55\xAA"
     return bytes(b)

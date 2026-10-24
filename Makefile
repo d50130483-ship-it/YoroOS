@@ -25,7 +25,9 @@ build:
 	mkdir -p build
 
 build/BOOTX64.EFI: $(SRC) | build
-	$(ZIG) cc $(CFLAGS) -nostdlib -o $@ src/main.c
+	$(ZIG) cc $(CFLAGS) -c -o build/main.obj src/main.c
+	$(ZIG) lld-link /subsystem:efi_application /entry:EfiMain /nodefaultlib \
+	  /base:0x10000 /dynamicbase /fixed:no /out:$@ build/main.obj
 	@ls -l $@
 
 cursor: src/cursor_data.h
